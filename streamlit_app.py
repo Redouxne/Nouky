@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import os
 
-# Display the title and description
+
 st.title("👩‍⚕️🩺 Medical Consultation Simulation with Nouky")
 st.write(
     """
@@ -10,11 +10,11 @@ Welcome to the consultation simulation! Nouky will pretend to be a patient with 
 """
 )
 
-# Define the SambaNova API key and base URL
-api_key = os.environ.get("SAMBANOVA_API_KEY", "78133d14-3cff-41c7-bcac-29a3dce289d0")
+
+api_key = os.environ.get("SAMBANOVA_API_KEY", "X")
 base_url = "https://api.sambanova.ai/v1"
 
-# Define headers for API requests
+
 headers = {
     "Authorization": f"Bearer {api_key}",
     "Content-Type": "application/json",
