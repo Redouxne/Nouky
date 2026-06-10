@@ -2,6 +2,11 @@
 
 # .gitignore
 .env
+API.env
+.env*.local
+.next/
+node_modules/
+out/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -21,6 +26,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!src/lib/
+!src/lib/**
 parts/
 sdist/
 var/
