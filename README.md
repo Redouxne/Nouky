@@ -1,5 +1,8 @@
 ### Lightning-Fast Medical Consultation Simulation with Nouky's Consultation Agent
 
+https://noukai.streamlit.app
+
+
 ## Inspiration
 
 The inspiration behind Nouky's Consultation Agent came from the need for a practical, interactive learning tool to help medical and pharmacy students improve their diagnostic skills and prepare for competitive exams. This agent serves as a foundational component for the final app, Nouky, which will feature a Leitner system for spaced repetition and advanced exam simulations to help students prepare for various medical and pharmacy competitions, including the Concours d'internat de pharmacie in France.
