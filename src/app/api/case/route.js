@@ -15,7 +15,7 @@ export async function POST(request) {
       [
         {
           role: "user",
-          content: `Choisis une maladie pertinente en ${specialty}. Reponds uniquement avec le nom de la maladie, sans ponctuation, sans explication.`,
+          content: `Choisis une maladie pertinente en ${specialty}, idéalement cette maladie est difficle à diagnostiquer. Reponds uniquement avec le nom de la maladie, sans ponctuation, sans explication.`,
         },
       ],
       { temperature: 0.95, topP: 0.9 },
