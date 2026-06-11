@@ -8,6 +8,9 @@ const nextConfig = {
   turbopack: {
     root,
   },
+  experimental: {
+    serverComponentsExternalPackages: ["@prisma/client"],
+  },
 };
 
 export default nextConfig;
