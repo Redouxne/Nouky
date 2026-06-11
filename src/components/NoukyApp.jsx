@@ -131,9 +131,9 @@ export default function NoukyApp() {
         <section className="start-view">
           <div className="start-content">
             <div className="eyebrow">Simulation clinique</div>
-            <h1 className="start-title">Choisis une specialite et lance la consultation.</h1>
+            <h1 className="start-title">Choisis une spécialité et lance la consultation.</h1>
             <p className="start-subtitle">
-              Le patient est genere cote serveur. La cle Mistral reste hors du navigateur.
+              Le patient est généré cote serveur. La cle Mistral reste hors du navigateur.
             </p>
 
             <div className="specialty-grid">
@@ -155,7 +155,7 @@ export default function NoukyApp() {
               <button className="primary-button" disabled={loading === "case"} onClick={startCase}>
                 {loading === "case" ? "Generation du patient..." : "Demarrer un cas"}
               </button>
-              <span className="hint">Specialite selectionnee : {selectedSpecialty}</span>
+              <span className="hint">Spécialité sélectionnée : {selectedSpecialty}</span>
             </div>
           </div>
         </section>
@@ -165,7 +165,7 @@ export default function NoukyApp() {
             <div>
               <div className="eyebrow">{caseData.specialty}</div>
               <h1>Consultation en cours</h1>
-              <p>Pose tes questions, demande les examens utiles, puis propose ton diagnostic.</p>
+              <p>Pose tes questions, demande les examens utiles, puis propose ton diagnostic !</p>
             </div>
             <button className="secondary-button" onClick={reset} type="button">
               Nouveau cas
