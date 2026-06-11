@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { SPECIALTIES } from "@/lib/text";
 
 function Message({ message }) {
@@ -30,7 +31,8 @@ async function postJson(url, payload) {
   return data;
 }
 
-export default function NoukyApp() {
+export default function NoukyApp({ user }) {
+  const router = useRouter();
   const [selectedSpecialty, setSelectedSpecialty] = useState(SPECIALTIES[0]);
   const [caseData, setCaseData] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -44,6 +46,15 @@ export default function NoukyApp() {
     () => messages.filter((message) => message.role === "student").length,
     [messages],
   );
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/auth/signin");
+    } catch (err) {
+      setError("Erreur lors de la déconnexion");
+    }
+  }
 
   async function startCase() {
     setLoading("case");
@@ -125,6 +136,20 @@ export default function NoukyApp() {
           <img className="brand-logo" src="/Leoard.png" alt="" />
           <span className="brand-name">Nouky</span>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          {user && (
+            <span style={{ color: "var(--muted)", fontSize: "0.95rem" }}>
+              Bienvenue, <strong>{user.name || user.email}</strong>
+            </span>
+          )}
+          <button
+            onClick={handleLogout}
+            className="secondary-button"
+            style={{ padding: "8px 14px", minHeight: "auto", fontSize: "0.9rem" }}
+          >
+            Déconnexion
+          </button>
+        </div>
       </header>
 
       {!caseData ? (
@@ -133,7 +158,7 @@ export default function NoukyApp() {
             <div className="eyebrow">Simulation clinique</div>
             <h1 className="start-title">Choisis une spécialité et lance la consultation.</h1>
             <p className="start-subtitle">
-              Le patient est généré cote serveur. La cle Mistral reste hors du navigateur.
+              Le patient est généré côté serveur. La clé Mistral reste hors du navigateur.
             </p>
 
             <div className="specialty-grid">
@@ -153,7 +178,7 @@ export default function NoukyApp() {
 
             <div className="start-actions">
               <button className="primary-button" disabled={loading === "case"} onClick={startCase}>
-                {loading === "case" ? "Generation du patient..." : "Demarrer un cas"}
+                {loading === "case" ? "Génération du patient..." : "Démarrer un cas"}
               </button>
               <span className="hint">Spécialité sélectionnée : {selectedSpecialty}</span>
             </div>
@@ -183,7 +208,7 @@ export default function NoukyApp() {
 
               <div className="messages">
                 {messages.length === 0 ? (
-                  <div className="empty-dialogue">Pose ta premiere question.</div>
+                  <div className="empty-dialogue">Pose ta première question.</div>
                 ) : (
                   messages.map((message, index) => <Message key={`${message.role}-${index}`} message={message} />)
                 )}
@@ -218,7 +243,7 @@ export default function NoukyApp() {
                   disabled={loading === "diagnosis" || !diagnosis.trim()}
                   type="submit"
                 >
-                  {loading === "diagnosis" ? "Evaluation..." : "Evaluer"}
+                  {loading === "diagnosis" ? "Évaluation..." : "Évaluer"}
                 </button>
                 {feedback ? <div className="feedback">{feedback}</div> : null}
               </form>
