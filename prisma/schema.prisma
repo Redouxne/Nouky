@@ -8,10 +8,66 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  password  String
-  name      String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String
+  name         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  caseSessions CaseSession[]
+  answers      Answer[]
+  leitnerCards LeitnerCard[]
+}
+
+model CaseSession {
+  id              String   @id @default(cuid())
+  userId          String
+  title           String
+  subject         String
+  difficulty      String
+  hiddenDiagnosis String?
+  statement       String
+  biologicalJson  String   @default("[]")
+  questionsJson   String
+  mode            String   @default("case")
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers         Answer[]
+}
+
+model Answer {
+  id             String   @id @default(cuid())
+  userId         String
+  caseSessionId  String
+  questionId     String
+  userAnswer     String
+  correctionJson String
+  score          Float
+  maxScore       Float
+  createdAt      DateTime @default(now())
+
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseSession    CaseSession @relation(fields: [caseSessionId], references: [id], onDelete: Cascade)
+}
+
+model LeitnerCard {
+  id             String    @id @default(cuid())
+  userId         String
+  skillId        String
+  subject        String
+  front          String
+  back           String
+  box            Int       @default(1)
+  dueAt          DateTime  @default(now())
+  successCount   Int       @default(0)
+  failureCount   Int       @default(0)
+  lastReviewedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, skillId, front])
+  @@index([userId, dueAt])
 }

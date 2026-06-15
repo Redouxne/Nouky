@@ -1,33 +1,49 @@
 # Nouky
 
-Nouky is a Vercel-ready Next.js app for medical consultation simulation.
+Nouky est une plateforme Next.js de préparation aux dossiers thérapeutiques et biologiques de l'internat de pharmacie.
 
-The Mistral API key is used only in server routes under `src/app/api/*`, so it is never sent to the browser.
+Le modèle Mistral est appelé uniquement depuis les routes serveur. La clé API doit rester dans `.env.local` en local ou dans les variables d'environnement Vercel.
 
-## Local Setup
+## Local
 
 ```bash
 npm install
-cp .env.example .env.local
+cp -n .env.example .env
+cp -n .env.example .env.local
+npx prisma db push
 npm run dev
 ```
 
-Set `MISTRAL_API_KEY` in `.env.local`, then open http://127.0.0.1:3000.
+Renseigner `MISTRAL_API_KEY` dans `.env.local`, puis ouvrir `http://127.0.0.1:3000`.
+
+## Variables
+
+```env
+DATABASE_URL="file:./dev.db"
+MISTRAL_API_KEY=""
+MISTRAL_MODEL="mistral-large-latest"
+NEXTAUTH_SECRET="change-me"
+```
+
+## Fonctionnalités
+
+- Dossiers progressifs concours par matière et difficulté.
+- Correction immédiate avec barème, mots-clés, oublis et erreurs graves.
+- Cartes de révision Leitner générées depuis les erreurs.
+- Progression par score, matière faible et compétence faible.
+- Concours blanc de 3 à 5 dossiers.
+
+## Routes principales
+
+- `POST /api/cases/generate`
+- `POST /api/cases/answer`
+- `GET /api/leitner/due`
+- `POST /api/leitner/review`
+- `GET /api/progress`
+- `POST /api/mock-exam/generate`
 
 ## Vercel
 
-Add these environment variables in the Vercel project settings:
+Déployer comme projet Next.js standard. Ajouter au minimum `MISTRAL_API_KEY`, `MISTRAL_MODEL` et `DATABASE_URL` dans les variables d'environnement du projet.
 
-```bash
-MISTRAL_API_KEY=...
-MISTRAL_MODEL=mistral-large-latest
-```
-
-Then deploy as a standard Next.js project.
-
-## App Flow
-
-- The specialty selection is a centered standalone start page.
-- `/api/case` creates a hidden case and returns only patient-facing symptoms.
-- `/api/chat` handles patient answers and exam results server-side.
-- `/api/evaluate` evaluates the proposed diagnosis server-side.
+SQLite convient au développement local. Pour une vraie persistance en production Vercel, utiliser une base managée compatible Prisma, par exemple Postgres.

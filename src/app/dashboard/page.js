@@ -4,7 +4,7 @@ import NoukyApp from "@/components/NoukyApp";
 
 export const metadata = {
   title: "Dashboard - Nouky",
-  description: "Simulation de consultation medicale pour l'entrainement clinique.",
+  description: "Plateforme d'entrainement aux dossiers de l'internat de pharmacie.",
 };
 
 export default async function DashboardPage() {

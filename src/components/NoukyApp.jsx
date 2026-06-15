@@ -1,28 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SPECIALTIES } from "@/lib/text";
+import { PROGRAM_OPTIONS } from "@/lib/internat-program";
 
-function Message({ message }) {
-  const isStudent = message.role === "student";
-  const avatar = isStudent ? "/usericon.png" : "/Leoard.png";
-  const rowClass = `message-row ${isStudent ? "student" : ""}`;
-  const bubbleClass = `bubble ${message.role}`;
+const DIFFICULTIES = ["facile", "intermédiaire", "difficile"];
+const TABS = [
+  { id: "cases", label: "Dossiers" },
+  { id: "leitner", label: "Révisions Leitner" },
+  { id: "progress", label: "Progression" },
+  { id: "mock", label: "Concours blanc" },
+];
 
-  return (
-    <div className={rowClass}>
-      <img className="avatar" src={avatar} alt="" />
-      <div className={bubbleClass}>{message.content}</div>
-    </div>
-  );
-}
-
-async function postJson(url, payload) {
+async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
   });
   const data = await response.json();
   if (!response.ok) {
@@ -31,87 +27,90 @@ async function postJson(url, payload) {
   return data;
 }
 
+function formatScore(score, maxScore) {
+  if (!maxScore) return "0/0";
+  return `${Number(score || 0).toFixed(1).replace(".0", "")}/${Number(maxScore || 0).toFixed(1).replace(".0", "")}`;
+}
+
 export default function NoukyApp({ user }) {
   const router = useRouter();
-  const [selectedSpecialty, setSelectedSpecialty] = useState(SPECIALTIES[0]);
-  const [caseData, setCaseData] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [question, setQuestion] = useState("");
-  const [diagnosis, setDiagnosis] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [activeTab, setActiveTab] = useState("cases");
+  const [subjectId, setSubjectId] = useState("rhumatologie");
+  const [difficulty, setDifficulty] = useState("intermédiaire");
+  const [caseSession, setCaseSession] = useState(null);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [answerDraft, setAnswerDraft] = useState("");
+  const [corrections, setCorrections] = useState({});
+  const [leitnerCards, setLeitnerCards] = useState([]);
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [showBack, setShowBack] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [mockCases, setMockCases] = useState([]);
+  const [mockCount, setMockCount] = useState(3);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
 
-  const exchangeCount = useMemo(
-    () => messages.filter((message) => message.role === "student").length,
-    [messages],
-  );
+  const currentQuestion = caseSession?.questions?.[currentQuestionIndex];
+  const totalScore = useMemo(() => {
+    return Object.values(corrections).reduce(
+      (acc, correction) => ({
+        score: acc.score + Number(correction.score || 0),
+        maxScore: acc.maxScore + Number(correction.maxScore || 0),
+      }),
+      { score: 0, maxScore: 0 },
+    );
+  }, [corrections]);
+
+  useEffect(() => {
+    if (activeTab === "leitner") loadDueCards();
+    if (activeTab === "progress") loadProgress();
+  }, [activeTab]);
 
   async function handleLogout() {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      router.push("/auth/signin");
-    } catch (err) {
-      setError("Erreur lors de la déconnexion");
-    }
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/auth/signin");
   }
 
-  async function startCase() {
+  async function generateCase() {
     setLoading("case");
     setError("");
-    setFeedback("");
-    setDiagnosis("");
-    setMessages([]);
+    setCorrections({});
+    setAnswerDraft("");
+    setCurrentQuestionIndex(0);
     try {
-      const data = await postJson("/api/case", { specialty: selectedSpecialty });
-      setCaseData(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading("");
-    }
-  }
-
-  async function sendQuestion(event) {
-    event.preventDefault();
-    const trimmed = question.trim();
-    if (!trimmed || !caseData) return;
-
-    const nextMessages = [...messages, { role: "student", content: trimmed }];
-    setMessages(nextMessages);
-    setQuestion("");
-    setLoading("chat");
-    setError("");
-
-    try {
-      const reply = await postJson("/api/chat", {
-        caseToken: caseData.caseToken,
-        messages,
-        question: trimmed,
+      const data = await fetchJson("/api/cases/generate", {
+        method: "POST",
+        body: JSON.stringify({ subjectId, difficulty }),
       });
-      setMessages([...nextMessages, reply]);
+      setCaseSession(data.caseSession);
     } catch (err) {
       setError(err.message);
-      setMessages(messages);
     } finally {
       setLoading("");
     }
   }
 
-  async function evaluateDiagnosis(event) {
+  async function submitAnswer(event) {
     event.preventDefault();
-    const trimmed = diagnosis.trim();
-    if (!trimmed || !caseData) return;
+    if (!caseSession || !currentQuestion || !answerDraft.trim()) return;
 
-    setLoading("diagnosis");
+    setLoading("answer");
     setError("");
     try {
-      const data = await postJson("/api/evaluate", {
-        caseToken: caseData.caseToken,
-        diagnosis: trimmed,
-        messages,
+      const data = await fetchJson("/api/cases/answer", {
+        method: "POST",
+        body: JSON.stringify({
+          caseSessionId: caseSession.id,
+          questionId: currentQuestion.id,
+          answer: answerDraft,
+        }),
       });
-      setFeedback(data.feedback);
+      setCorrections((current) => ({
+        ...current,
+        [currentQuestion.id]: data.correction,
+      }));
+      setAnswerDraft("");
+      setProgress(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -119,14 +118,79 @@ export default function NoukyApp({ user }) {
     }
   }
 
-  function reset() {
-    setCaseData(null);
-    setMessages([]);
-    setQuestion("");
-    setDiagnosis("");
-    setFeedback("");
+  async function loadDueCards() {
+    setLoading("leitner");
     setError("");
-    setLoading("");
+    try {
+      const data = await fetchJson("/api/leitner/due");
+      setLeitnerCards(data.cards || []);
+      setActiveCardIndex(0);
+      setShowBack(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function reviewCard(rating) {
+    const card = leitnerCards[activeCardIndex];
+    if (!card) return;
+    setLoading("review");
+    setError("");
+    try {
+      await fetchJson("/api/leitner/review", {
+        method: "POST",
+        body: JSON.stringify({ cardId: card.id, rating }),
+      });
+      const nextCards = leitnerCards.filter((item) => item.id !== card.id);
+      setLeitnerCards(nextCards);
+      setActiveCardIndex(0);
+      setShowBack(false);
+      setProgress(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function loadProgress() {
+    setLoading("progress");
+    setError("");
+    try {
+      const data = await fetchJson("/api/progress");
+      setProgress(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function generateMockExam() {
+    setLoading("mock");
+    setError("");
+    try {
+      const subjectIds = PROGRAM_OPTIONS.slice(0, mockCount).map((item) => item.id);
+      const data = await fetchJson("/api/mock-exam/generate", {
+        method: "POST",
+        body: JSON.stringify({ subjectIds, difficulty, count: mockCount }),
+      });
+      setMockCases(data.cases || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function openMockCase(item) {
+    setCaseSession(item);
+    setCorrections({});
+    setAnswerDraft("");
+    setCurrentQuestionIndex(0);
+    setActiveTab("cases");
   }
 
   return (
@@ -134,123 +198,371 @@ export default function NoukyApp({ user }) {
       <header className="topbar">
         <div className="brand">
           <img className="brand-logo" src="/Leoard.png" alt="" />
-          <span className="brand-name">Nouky</span>
+          <div>
+            <div className="brand-name">Nouky</div>
+            <div className="brand-subtitle">Internat pharmacie</div>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          {user && (
-            <span style={{ color: "var(--muted)", fontSize: "0.95rem" }}>
-              Bienvenue, <strong>{user.name || user.email}</strong>
-            </span>
-          )}
-          <button
-            onClick={handleLogout}
-            className="secondary-button"
-            style={{ padding: "8px 14px", minHeight: "auto", fontSize: "0.9rem" }}
-          >
-            Déconnexion
-          </button>
+        <div className="userbar">
+          <span>{user?.name || user?.email}</span>
+          <button className="secondary-button small" onClick={handleLogout}>Déconnexion</button>
         </div>
       </header>
 
-      {!caseData ? (
-        <section className="start-view">
-          <div className="start-content">
-            <div className="eyebrow">Simulation clinique</div>
-            <h1 className="start-title">Choisis une spécialité et lance la consultation.</h1>
-            <p className="start-subtitle">
-              Le patient est généré côté serveur. La clé Mistral reste hors du navigateur.
-            </p>
+      <section className="hero-panel">
+        <div>
+          <div className="eyebrow">Préparation concours</div>
+          <h1>Dossiers thérapeutiques et biologiques</h1>
+          <p>Anki + annales + correction exigeante pour l'internat de pharmacie.</p>
+        </div>
+      </section>
 
-            <div className="specialty-grid">
-              {SPECIALTIES.map((specialty) => (
+      <nav className="tabs" aria-label="Navigation principale">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`tab-button ${activeTab === tab.id ? "active" : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {error ? <div className="error">{error}</div> : null}
+
+      {activeTab === "cases" ? (
+        <CasesTab
+          answerDraft={answerDraft}
+          caseSession={caseSession}
+          corrections={corrections}
+          currentQuestion={currentQuestion}
+          currentQuestionIndex={currentQuestionIndex}
+          difficulty={difficulty}
+          loading={loading}
+          setAnswerDraft={setAnswerDraft}
+          setCurrentQuestionIndex={setCurrentQuestionIndex}
+          setDifficulty={setDifficulty}
+          setSubjectId={setSubjectId}
+          subjectId={subjectId}
+          submitAnswer={submitAnswer}
+          totalScore={totalScore}
+          generateCase={generateCase}
+        />
+      ) : null}
+
+      {activeTab === "leitner" ? (
+        <LeitnerTab
+          activeCardIndex={activeCardIndex}
+          cards={leitnerCards}
+          loading={loading}
+          reviewCard={reviewCard}
+          setActiveCardIndex={setActiveCardIndex}
+          setShowBack={setShowBack}
+          showBack={showBack}
+          reload={loadDueCards}
+        />
+      ) : null}
+
+      {activeTab === "progress" ? (
+        <ProgressTab loading={loading} progress={progress} reload={loadProgress} />
+      ) : null}
+
+      {activeTab === "mock" ? (
+        <MockExamTab
+          difficulty={difficulty}
+          generateMockExam={generateMockExam}
+          loading={loading}
+          mockCases={mockCases}
+          mockCount={mockCount}
+          openMockCase={openMockCase}
+          setDifficulty={setDifficulty}
+          setMockCount={setMockCount}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function CasesTab(props) {
+  const {
+    answerDraft,
+    caseSession,
+    corrections,
+    currentQuestion,
+    currentQuestionIndex,
+    difficulty,
+    loading,
+    setAnswerDraft,
+    setCurrentQuestionIndex,
+    setDifficulty,
+    setSubjectId,
+    subjectId,
+    submitAnswer,
+    totalScore,
+    generateCase,
+  } = props;
+
+  return (
+    <section className="tab-panel">
+      <div className="control-grid">
+        <label>
+          Matière
+          <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+            {PROGRAM_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Difficulté
+          <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+            {DIFFICULTIES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <button className="primary-button" onClick={generateCase} disabled={loading === "case"}>
+          {loading === "case" ? "Génération..." : "Générer un dossier"}
+        </button>
+      </div>
+
+      {!caseSession ? (
+        <div className="empty-state">Sélectionne une matière puis génère un dossier progressif.</div>
+      ) : (
+        <div className="case-layout">
+          <article className="panel case-document">
+            <div className="panel-header">
+              <div>
+                <div className="eyebrow">{caseSession.subject}</div>
+                <h2>{caseSession.title}</h2>
+              </div>
+              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+            </div>
+            <div className="document-body">
+              <h3>Énoncé</h3>
+              <p>{caseSession.statement}</p>
+              <h3>Bilan biologique</h3>
+              <table className="data-table">
+                <tbody>
+                  {caseSession.biologicalData.map((item) => (
+                    <tr key={`${item.label}-${item.value}`}>
+                      <th>{item.label}</th>
+                      <td>{item.value}</td>
+                      <td>{item.interpretation}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <aside className="panel question-panel">
+            <div className="panel-header">
+              <h2>Questions</h2>
+              <span className="counter">{currentQuestionIndex + 1}/{caseSession.questions.length}</span>
+            </div>
+            <div className="question-list">
+              {caseSession.questions.map((question, index) => (
                 <button
-                  className={`specialty-card ${selectedSpecialty === specialty ? "selected" : ""}`}
-                  key={specialty}
-                  onClick={() => setSelectedSpecialty(specialty)}
+                  key={question.id}
+                  className={`question-nav ${index === currentQuestionIndex ? "active" : ""} ${corrections[question.id] ? "done" : ""}`}
+                  onClick={() => setCurrentQuestionIndex(index)}
                   type="button"
                 >
-                  <strong>{specialty}</strong>
+                  Q{index + 1} · {corrections[question.id] ? formatScore(corrections[question.id].score, corrections[question.id].maxScore) : `${question.maxScore} pts`}
                 </button>
               ))}
             </div>
 
-            {error ? <div className="error">{error}</div> : null}
+            {currentQuestion ? (
+              <form className="answer-form" onSubmit={submitAnswer}>
+                <h3>Question {currentQuestionIndex + 1}</h3>
+                <p>{currentQuestion.text}</p>
+                <textarea
+                  value={answerDraft}
+                  onChange={(event) => setAnswerDraft(event.target.value)}
+                  placeholder="Réponse structurée attendue : diagnostic, arguments, biologie, thérapeutique, surveillance..."
+                  disabled={loading === "answer"}
+                />
+                <button className="primary-button" disabled={loading === "answer" || !answerDraft.trim()}>
+                  {loading === "answer" ? "Correction..." : "Corriger"}
+                </button>
+              </form>
+            ) : null}
 
-            <div className="start-actions">
-              <button className="primary-button" disabled={loading === "case"} onClick={startCase}>
-                {loading === "case" ? "Génération du patient..." : "Démarrer un cas"}
-              </button>
-              <span className="hint">Spécialité sélectionnée : {selectedSpecialty}</span>
-            </div>
+            {currentQuestion && corrections[currentQuestion.id] ? (
+              <CorrectionBlock correction={corrections[currentQuestion.id]} />
+            ) : null}
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CorrectionBlock({ correction }) {
+  return (
+    <div className="correction-block">
+      <div className={`status ${correction.status}`}>{correction.status}</div>
+      <h3>Correction concours</h3>
+      <p><strong>Score estimé :</strong> {formatScore(correction.score, correction.maxScore)}</p>
+      <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
+      <p><strong>Correction type :</strong> {correction.examStyleCorrection}</p>
+      {correction.missingKeywords?.length ? (
+        <p><strong>Éléments attendus non cités :</strong> {correction.missingKeywords.join(", ")}</p>
+      ) : null}
+      {correction.majorErrors?.length ? (
+        <p><strong>Erreurs importantes :</strong> {correction.majorErrors.join(", ")}</p>
+      ) : null}
+      <p><strong>Appréciation :</strong> {correction.feedback}</p>
+    </div>
+  );
+}
+
+function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCardIndex, setShowBack, showBack, reload }) {
+  const card = cards[activeCardIndex];
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>Révisions Leitner</h2>
+          <p>Cartes dues aujourd'hui, issues des erreurs de dossiers.</p>
+        </div>
+        <button className="secondary-button" onClick={reload} disabled={loading === "leitner"}>Actualiser</button>
+      </div>
+
+      {!card ? (
+        <div className="empty-state">Aucune carte due pour le moment.</div>
+      ) : (
+        <div className="leitner-card panel">
+          <div className="eyebrow">{card.subject} · Box {card.box}</div>
+          <h3>{card.front}</h3>
+          {showBack ? <p className="card-back">{card.back}</p> : null}
+          <div className="button-row">
+            {!showBack ? (
+              <button className="primary-button" onClick={() => setShowBack(true)}>Afficher la réponse</button>
+            ) : (
+              <>
+                <button className="secondary-button" onClick={() => reviewCard("failure")}>Échec</button>
+                <button className="secondary-button" onClick={() => reviewCard("difficult")}>Difficile</button>
+                <button className="primary-button" onClick={() => reviewCard("correct")}>Correct</button>
+                <button className="primary-button" onClick={() => reviewCard("mastered")}>Maîtrisé</button>
+              </>
+            )}
           </div>
-        </section>
+          {cards.length > 1 ? (
+            <div className="button-row">
+              {cards.map((item, index) => (
+                <button
+                  key={item.id}
+                  className={`dot-button ${index === activeCardIndex ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveCardIndex(index);
+                    setShowBack(false);
+                  }}
+                  type="button"
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProgressTab({ loading, progress, reload }) {
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>Progression</h2>
+          <p>Suivi des scores, matières faibles et cartes dues.</p>
+        </div>
+        <button className="secondary-button" onClick={reload} disabled={loading === "progress"}>Actualiser</button>
+      </div>
+      {!progress ? (
+        <div className="empty-state">Charge les statistiques pour afficher la progression.</div>
       ) : (
         <>
-          <section className="case-header">
-            <div>
-              <div className="eyebrow">{caseData.specialty}</div>
-              <h1>Consultation en cours</h1>
-              <p>Pose tes questions, demande les examens utiles, puis propose ton diagnostic !</p>
-            </div>
-            <button className="secondary-button" onClick={reset} type="button">
-              Nouveau cas
-            </button>
-          </section>
-
-          {error ? <div className="error">{error}</div> : null}
-
-          <section className="workspace">
-            <div className="panel conversation">
-              <div className="panel-header">
-                <h2>Patient</h2>
-                <span className="counter">{exchangeCount} question(s)</span>
-              </div>
-
-              <div className="messages">
-                {messages.length === 0 ? (
-                  <div className="empty-dialogue">Pose ta première question.</div>
-                ) : (
-                  messages.map((message, index) => <Message key={`${message.role}-${index}`} message={message} />)
-                )}
-              </div>
-
-              <form className="composer" onSubmit={sendQuestion}>
-                <textarea
-                  disabled={loading === "chat"}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  placeholder="Ex. Depuis quand avez-vous mal ?"
-                  value={question}
-                />
-                <button className="primary-button" disabled={loading === "chat" || !question.trim()} type="submit">
-                  {loading === "chat" ? "..." : "Envoyer"}
-                </button>
-              </form>
-            </div>
-
-            <aside className="panel">
-              <div className="panel-header">
-                <h2>Diagnostic</h2>
-              </div>
-              <form className="diagnosis" onSubmit={evaluateDiagnosis}>
-                <textarea
-                  disabled={loading === "diagnosis"}
-                  onChange={(event) => setDiagnosis(event.target.value)}
-                  placeholder="Diagnostic, arguments, examens, prise en charge..."
-                  value={diagnosis}
-                />
-                <button
-                  className="primary-button"
-                  disabled={loading === "diagnosis" || !diagnosis.trim()}
-                  type="submit"
-                >
-                  {loading === "diagnosis" ? "Évaluation..." : "Évaluer"}
-                </button>
-                {feedback ? <div className="feedback">{feedback}</div> : null}
-              </form>
-            </aside>
-          </section>
+          <div className="stats-grid">
+            <Metric label="Score moyen" value={`${progress.averageScore}%`} />
+            <Metric label="Dossiers réalisés" value={progress.caseCount} />
+            <Metric label="Réponses corrigées" value={progress.answerCount} />
+            <Metric label="Cartes dues" value={progress.dueCards} />
+            <Metric label="Cartes totales" value={progress.totalCards} />
+          </div>
+          <div className="two-columns">
+            <ListPanel title="Matières faibles" items={progress.weakSubjects} render={(item) => `${item.subject} · ${item.rate}%`} />
+            <ListPanel title="Compétences à revoir" items={progress.weakSkills} render={(item) => `${item.subject} · ${item.skillLabel || item.skillId} · ${item.failureCount} échec(s)`} />
+          </div>
         </>
       )}
-    </main>
+    </section>
+  );
+}
+
+function MockExamTab({ difficulty, generateMockExam, loading, mockCases, mockCount, openMockCase, setDifficulty, setMockCount }) {
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>Concours blanc</h2>
+          <p>Génère 3 à 5 dossiers et traite-les comme une série d'entraînement.</p>
+        </div>
+      </div>
+      <div className="control-grid">
+        <label>
+          Nombre de dossiers
+          <select value={mockCount} onChange={(event) => setMockCount(Number(event.target.value))}>
+            {[3, 4, 5].map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          Difficulté
+          <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+            {DIFFICULTIES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <button className="primary-button" onClick={generateMockExam} disabled={loading === "mock"}>
+          {loading === "mock" ? "Génération..." : "Générer le concours blanc"}
+        </button>
+      </div>
+      <div className="case-list">
+        {mockCases.map((item, index) => (
+          <button className="case-item" key={item.id} onClick={() => openMockCase(item)} type="button">
+            <span>Dossier {index + 1}</span>
+            <strong>{item.title}</strong>
+            <small>{item.subject} · {item.questions.length} questions</small>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ListPanel({ title, items, render }) {
+  return (
+    <div className="panel list-panel">
+      <h3>{title}</h3>
+      {items?.length ? (
+        <ul>
+          {items.map((item, index) => <li key={`${title}-${index}`}>{render(item)}</li>)}
+        </ul>
+      ) : (
+        <p>Aucune donnée suffisante.</p>
+      )}
+    </div>
   );
 }

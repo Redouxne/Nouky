@@ -2,7 +2,7 @@ import "./globals.css";
 
 export const metadata = {
   title: "Nouky",
-  description: "Simulation de consultation medicale pour l'entrainement clinique.",
+  description: "Dossiers, corrections et revisions pour l'internat de pharmacie.",
 };
 
 export default function RootLayout({ children }) {

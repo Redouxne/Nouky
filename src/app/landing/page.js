@@ -14,11 +14,11 @@ export default function LandingPage() {
 
       <section className="start-view">
         <div className="start-content">
-          <div className="eyebrow">Simulation Clinique</div>
-          <h1 className="start-title">Entraîne-toi à la consultation médicale</h1>
+          <div className="eyebrow">Internat pharmacie</div>
+          <h1 className="start-title">Dossiers thérapeutiques et biologiques</h1>
           <p className="start-subtitle">
-            Nouky est une plateforme de simulation clinique pour développer tes compétences de diagnostic. Pose
-            des questions, demande des examens, et propose ton diagnostic face à des cas cliniques réalistes.
+            Nouky génère des dossiers progressifs, corrige les réponses selon un barème strict et organise les
+            révisions avec un système Leitner.
           </p>
 
           <div style={{ marginBottom: "32px" }}>
@@ -26,10 +26,10 @@ export default function LandingPage() {
               Pourquoi Nouky ?
             </h2>
             <ul style={{ color: "var(--muted)", lineHeight: "1.8", maxWidth: "600px" }}>
-              <li>✓ Cas cliniques générés par IA</li>
-              <li>✓ Feedback immédiat sur tes diagnostics</li>
-              <li>✓ Entraînement multispecialités</li>
-              <li>✓ Progression suivie et sécurisée</li>
+              <li>Dossiers proches concours générés par IA</li>
+              <li>Correction immédiate avec mots-clés et points</li>
+              <li>Cartes Leitner créées à partir des erreurs</li>
+              <li>Progression suivie par matière et compétence</li>
             </ul>
           </div>
 
