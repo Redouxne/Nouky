@@ -32,8 +32,8 @@ model CaseSession {
   mode            String   @default("case")
   createdAt       DateTime @default(now())
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  answers         Answer[]
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers Answer[]
 }
 
 model Answer {
@@ -47,8 +47,8 @@ model Answer {
   maxScore       Float
   createdAt      DateTime @default(now())
 
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  caseSession    CaseSession @relation(fields: [caseSessionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseSession CaseSession @relation(fields: [caseSessionId], references: [id], onDelete: Cascade)
 }
 
 model LeitnerCard {
@@ -66,7 +66,7 @@ model LeitnerCard {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, skillId, front])
   @@index([userId, dueAt])

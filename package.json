@@ -16,14 +16,17 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@prisma/client": "^5.8.0",
+    "bcryptjs": "^2.4.3",
     "next": "^16.0.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "@prisma/client": "^5.8.0",
-    "bcryptjs": "^2.4.3"
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "prisma": "^5.8.0"
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.17",
+    "prisma": "^5.8.0",
+    "typescript": "6.0.3"
   },
   "overrides": {
     "postcss": "^8.5.10"
