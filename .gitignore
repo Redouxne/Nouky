@@ -13,3 +13,5 @@ dev.db
 prisma/dev.db
 .vercel
 prisma/migrations
+.env*
+!.env.example
