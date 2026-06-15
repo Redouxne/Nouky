@@ -14,12 +14,12 @@ npx prisma db push
 npm run dev
 ```
 
-Renseigner `DATABASE_URL` et `MISTRAL_API_KEY` dans `.env.local`, puis ouvrir `http://127.0.0.1:3000`.
+Renseigner `DATABASE2_URL` et `MISTRAL_API_KEY` dans `.env.local`, puis ouvrir `http://127.0.0.1:3000`.
 
 ## Variables
 
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public"
+DATABASE2_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public"
 MISTRAL_API_KEY=""
 MISTRAL_MODEL="mistral-large-latest"
 NEXTAUTH_SECRET="change-me"
@@ -44,11 +44,11 @@ NEXTAUTH_SECRET="change-me"
 
 ## Vercel
 
-Déployer comme projet Next.js standard. Ajouter au minimum `MISTRAL_API_KEY`, `MISTRAL_MODEL`, `NEXTAUTH_SECRET` et `DATABASE_URL` dans les variables d'environnement du projet.
+Déployer comme projet Next.js standard. Ajouter au minimum `MISTRAL_API_KEY`, `MISTRAL_MODEL`, `NEXTAUTH_SECRET` et `DATABASE2_URL` dans les variables d'environnement du projet.
 
 La base doit être PostgreSQL pour une vraie persistance sur Vercel. Une base Neon, Supabase, Vercel Postgres ou tout Postgres managé compatible Prisma convient.
 
-Après avoir configuré `DATABASE_URL`, appliquer le schéma :
+Après avoir configuré `DATABASE2_URL`, appliquer le schéma :
 
 ```bash
 npx prisma db push
