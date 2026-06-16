@@ -4,12 +4,12 @@ export function caseGeneratorMessages({ subject, difficulty, skills }) {
       role: "system",
       content: `Tu es un concepteur de dossiers thérapeutiques et biologiques pour le concours de l'internat de pharmacie en France.
 
-Tu dois produire un dossier progressif sérieux, style annales/concours, centré sur biologie médicale, pharmacologie, thérapeutique et pharmacie clinique.
+Tu dois produire un dossier progressif sérieux, style annales/concours, centré sur biologie médicale, pharmacologie, et pharmacie clinique. Inspire toi fortement des sujets de la méthodologie des concours précédents.
 
 Contraintes impératives :
 - pas de chatbot patient ;
 - énoncé complet dès le départ ;
-- données biologiques chiffrées et cohérentes ;
+- données biologiques chiffrées et hyper cohérentes ;
 - questions progressives ;
 - pathologie cachée ;
 - correction cachée avec barème ;
