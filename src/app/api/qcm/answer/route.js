@@ -1,4 +1,4 @@
-import { correctAnswer, generateCaseItemLeitnerCards, publicCasePayload, totalPoints } from "@/lib/exam-engine";
+import { correctQcmAnswer, generateQcmLeitnerCards, publicCasePayload } from "@/lib/exam-engine";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
@@ -9,37 +9,34 @@ export async function POST(request) {
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
-    const { caseSessionId, questionId, answer } = await request.json();
-    const userAnswer = String(answer || "").trim();
-    if (!caseSessionId || !questionId || !userAnswer) {
-      return Response.json({ error: "Réponse incomplète" }, { status: 400 });
+    const { caseSessionId, questionId, selectedOptionIds = [] } = await request.json();
+    if (!caseSessionId || !questionId) {
+      return Response.json({ error: "QCM incomplet" }, { status: 400 });
     }
 
     const caseSession = await prisma.caseSession.findFirst({
-      where: { id: caseSessionId, userId: session.id },
+      where: { id: caseSessionId, userId: session.id, mode: "qcm" },
     });
-    if (!caseSession) return Response.json({ error: "Dossier introuvable" }, { status: 404 });
+    if (!caseSession) return Response.json({ error: "Session QCM introuvable" }, { status: 404 });
 
     const questions = JSON.parse(caseSession.questionsJson);
     const question = questions.find((item) => item.id === questionId);
     if (!question) return Response.json({ error: "Question introuvable" }, { status: 404 });
 
-    const correction = await correctAnswer({ caseSession, question, userAnswer });
-    const maxScore = correction.maxScore || totalPoints(question.grading);
-
+    const correction = correctQcmAnswer({ question, selectedOptionIds });
     const savedAnswer = await prisma.answer.create({
       data: {
         userId: session.id,
         caseSessionId: caseSession.id,
         questionId,
-        userAnswer,
+        userAnswer: JSON.stringify(correction.selectedOptionIds),
         correctionJson: JSON.stringify(correction),
         score: correction.score,
-        maxScore,
+        maxScore: correction.maxScore,
       },
     });
 
-    const cards = generateCaseItemLeitnerCards({ caseSession, question, correction });
+    const cards = generateQcmLeitnerCards({ caseSession, question, correction });
     for (const card of cards) {
       await prisma.leitnerCard.upsert({
         where: {
@@ -55,8 +52,8 @@ export async function POST(request) {
           subject: card.subject || caseSession.subject,
           front: card.front,
           back: card.back,
-          box: card.box,
-          dueAt: card.dueAt,
+          box: card.box || 1,
+          dueAt: card.dueAt || new Date(),
           lastReviewedAt: new Date(),
           successCount: card.result === "passed" ? 1 : 0,
           failureCount: card.result === "failed" ? 1 : 0,
@@ -64,8 +61,8 @@ export async function POST(request) {
         update: {
           back: card.back,
           subject: card.subject || caseSession.subject,
-          box: card.box,
-          dueAt: card.dueAt,
+          box: card.box || 1,
+          dueAt: card.dueAt || new Date(),
           lastReviewedAt: new Date(),
           successCount: card.result === "passed" ? { increment: 1 } : undefined,
           failureCount: card.result === "failed" ? { increment: 1 } : undefined,
@@ -77,9 +74,9 @@ export async function POST(request) {
       answerId: savedAnswer.id,
       correction,
       createdCards: cards.length,
-      caseSession: publicCasePayload(caseSession),
+      qcmSession: publicCasePayload(caseSession),
     });
   } catch (error) {
-    return Response.json({ error: error.message || "Erreur correction" }, { status: 500 });
+    return Response.json({ error: error.message || "Erreur correction QCM" }, { status: 500 });
   }
 }

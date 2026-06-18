@@ -1,15 +1,12 @@
 import { extractJsonObject, clampScore, safeArray } from "@/lib/ai/json";
-import { caseGeneratorMessages, correctionMessages, leitnerCardMessages } from "@/lib/ai/prompts";
-import { getProgramSubject } from "@/lib/internat-program";
+import { caseGeneratorMessages, correctionMessages, leitnerCardMessages, qcmGeneratorMessages } from "@/lib/ai/prompts";
+import { getProgramSubject, getSkillLabel } from "@/lib/internat-program";
 import { mistralChat } from "@/lib/mistral";
 
-const LEITNER_INTERVALS = {
-  1: 1,
-  2: 3,
-  3: 7,
-  4: 14,
-  5: 30,
-};
+const LEITNER_MAX_BOX = 10;
+const LEITNER_MAX_INTERVAL_DAYS = 60;
+const LEITNER_BASE_INTERVAL_DAYS = 3;
+const LEITNER_GROWTH = 1.45;
 
 export function addDays(date, days) {
   const next = new Date(date);
@@ -17,17 +14,53 @@ export function addDays(date, days) {
   return next;
 }
 
+export function leitnerIntervalDays(box) {
+  const normalizedBox = Math.min(Math.max(Number(box) || 1, 1), LEITNER_MAX_BOX);
+  return Math.min(
+    LEITNER_MAX_INTERVAL_DAYS,
+    Math.round(LEITNER_BASE_INTERVAL_DAYS * LEITNER_GROWTH ** (normalizedBox - 1)),
+  );
+}
+
+export function scoreToLeitnerBox(score, maxScore) {
+  const ratio = maxScore ? Number(score || 0) / Number(maxScore || 1) : 0;
+  if (ratio < 0.5) return 1;
+  if (ratio < 0.6) return 2;
+  if (ratio < 0.7) return 3;
+  if (ratio < 0.8) return 4;
+  if (ratio < 0.85) return 5;
+  if (ratio < 0.9) return 6;
+  if (ratio < 0.95) return 7;
+  if (ratio < 0.98) return 8;
+  if (ratio < 1) return 9;
+  return LEITNER_MAX_BOX;
+}
+
 export function nextLeitnerState(card, rating) {
   const now = new Date();
   const failed = rating === "failure" || rating === "difficult";
   const jump = rating === "mastered" ? 2 : 1;
-  const box = failed ? 1 : Math.min(5, Number(card.box || 1) + jump);
+  const box = failed ? 1 : Math.min(LEITNER_MAX_BOX, Number(card.box || 1) + jump);
   return {
     box,
-    dueAt: addDays(now, LEITNER_INTERVALS[box] || 1),
+    dueAt: addDays(now, leitnerIntervalDays(box)),
     lastReviewedAt: now,
     successCount: failed ? Number(card.successCount || 0) : Number(card.successCount || 0) + 1,
     failureCount: failed ? Number(card.failureCount || 0) + 1 : Number(card.failureCount || 0),
+  };
+}
+
+export function leitnerStateFromScore({ score, maxScore, result }) {
+  const now = new Date();
+  const failed = result === "failed" || Number(score || 0) < Number(maxScore || 0) * 0.5;
+  const box = failed ? 1 : scoreToLeitnerBox(score, maxScore);
+  return {
+    box,
+    dueAt: addDays(now, leitnerIntervalDays(box)),
+    lastReviewedAt: now,
+    successCount: failed ? 0 : 1,
+    failureCount: failed ? 1 : 0,
+    result: failed ? "failed" : "passed",
   };
 }
 
@@ -38,11 +71,17 @@ export function publicCasePayload(caseSession) {
     title: caseSession.title,
     subject: caseSession.subject,
     difficulty: caseSession.difficulty,
+    mode: caseSession.mode,
     statement: caseSession.statement,
     biologicalData: JSON.parse(caseSession.biologicalJson || "[]"),
     questions: questions.map((question) => ({
       id: question.id,
+      type: question.type || "case",
       text: question.text,
+      options: safeArray(question.options).map((option) => ({
+        id: String(option.id),
+        text: String(option.text),
+      })),
       maxScore: totalPoints(question.grading),
     })),
     createdAt: caseSession.createdAt,
@@ -70,6 +109,24 @@ export async function generateCaseContent({ subjectId, difficulty = "intermédia
   }
 }
 
+export async function generateQcmContent({ subjectId, difficulty = "intermédiaire", count = 10 }) {
+  const subject = getProgramSubject(subjectId);
+  const normalizedCount = Math.min(Math.max(Number(count) || 10, 5), 20);
+  const skills = Object.entries(subject.skills)
+    .map(([id, label]) => `${subjectId}.${id}: ${label}`)
+    .join("\n");
+
+  try {
+    const raw = await mistralChat(qcmGeneratorMessages({ subject, difficulty, skills, count: normalizedCount }), {
+      temperature: 0.45,
+      topP: 0.88,
+    });
+    return normalizeQcmSet(extractJsonObject(raw), { subject, subjectId, difficulty, count: normalizedCount });
+  } catch (error) {
+    return fallbackQcmSet({ subject, subjectId, difficulty, count: normalizedCount });
+  }
+}
+
 export async function correctAnswer({ caseSession, question, userAnswer }) {
   const biologicalData = JSON.parse(caseSession.biologicalJson || "[]");
   const maxScore = totalPoints(question.grading);
@@ -88,6 +145,44 @@ export async function correctAnswer({ caseSession, question, userAnswer }) {
   } catch (error) {
     return fallbackCorrection(question, userAnswer, maxScore);
   }
+}
+
+export function correctQcmAnswer({ question, selectedOptionIds }) {
+  const selected = uniqueOptionIds(selectedOptionIds);
+  const correctIds = uniqueOptionIds(question.correctOptionIds);
+  const maxScore = totalPoints(question.grading) || 1;
+  const selectedSet = new Set(selected);
+  const correctSet = new Set(correctIds);
+  const exact = selected.length === correctIds.length && selected.every((id) => correctSet.has(id));
+  const correctSelected = selected.filter((id) => correctSet.has(id));
+  const wrongSelected = selected.filter((id) => !correctSet.has(id));
+  const missed = correctIds.filter((id) => !selectedSet.has(id));
+  const partialRatio = correctIds.length ? correctSelected.length / correctIds.length : 0;
+  const penalty = wrongSelected.length * 0.35 + missed.length * 0.2;
+  const partialScore = Math.max(0, Math.min(0.75, partialRatio - penalty)) * maxScore;
+  const score = exact ? maxScore : Math.round(partialScore * 2) / 2;
+  const status = exact ? "correct" : score > 0 ? "partiel" : "incorrect";
+  const optionsById = new Map(safeArray(question.options).map((option) => [String(option.id), String(option.text)]));
+
+  return {
+    score,
+    maxScore,
+    status,
+    expectedAnswer: String(question.expectedAnswer || correctIds.join(", ")),
+    selectedOptionIds: selected,
+    correctOptionIds: correctIds,
+    matchedKeywords: correctSelected,
+    missingKeywords: missed,
+    majorErrors: wrongSelected.map((id) => `${id}. ${optionsById.get(id) || "Proposition fausse sélectionnée"}`),
+    feedback: exact
+      ? "Réponse exacte."
+      : "Réponse incomplète ou proposition fausse sélectionnée : l'item doit être revu.",
+    examStyleCorrection: String(question.explanation || question.expectedAnswer || ""),
+    leitnerUpdates: safeArray(question.relatedLeitnerSkills).map((skillId) => ({
+      skillId: String(skillId),
+      result: exact ? "passed" : "failed",
+    })),
+  };
 }
 
 export async function generateLeitnerCards({ caseSession, question, correction }) {
@@ -116,6 +211,84 @@ export async function generateLeitnerCards({ caseSession, question, correction }
       front: `À retenir : ${question.text}`,
       back: correction.expectedAnswer || question.expectedAnswer,
     }));
+}
+
+export function generateCaseItemLeitnerCards({ caseSession, question, correction }) {
+  const updates = mergeLeitnerUpdates(question, correction);
+  const maxScore = Number(correction.maxScore || totalPoints(question.grading) || 0);
+  const score = Number(correction.score || 0);
+
+  return updates.map((update) => {
+    const state = leitnerStateFromScore({ score, maxScore, result: update.result });
+    const skillLabel = getSkillLabel(update.skillId);
+    return {
+      skillId: update.skillId,
+      subject: caseSession.subject,
+      front: `Item : ${skillLabel}`,
+      back: buildCaseItemBack({ question, correction, skillLabel }),
+      box: state.box,
+      dueAt: state.dueAt,
+      result: state.result,
+    };
+  });
+}
+
+export function generateQcmLeitnerCards({ caseSession, question, correction }) {
+  if (correction.status === "correct") return [];
+  const correctIds = uniqueOptionIds(question.correctOptionIds);
+  const correctText = correctIds
+    .map((id) => `${id}. ${safeArray(question.options).find((option) => String(option.id) === id)?.text || ""}`)
+    .join("\n");
+  const back = [
+    `Réponse attendue : ${correction.expectedAnswer}`,
+    correctText,
+    correction.examStyleCorrection,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return safeArray(question.relatedLeitnerSkills)
+    .slice(0, 3)
+    .map((skillId) => ({
+      skillId: String(skillId),
+      subject: caseSession.subject,
+      front: `QCM à revoir : ${question.text}`,
+      back,
+      box: 1,
+      dueAt: addDays(new Date(), leitnerIntervalDays(1)),
+      result: "failed",
+    }));
+}
+
+function mergeLeitnerUpdates(question, correction) {
+  const maxScore = Number(correction.maxScore || totalPoints(question.grading) || 0);
+  const score = Number(correction.score || 0);
+  const defaultResult = score >= maxScore * 0.5 ? "passed" : "failed";
+  const merged = new Map();
+
+  for (const skillId of safeArray(question.relatedLeitnerSkills)) {
+    if (skillId) merged.set(String(skillId), defaultResult);
+  }
+
+  for (const update of safeArray(correction.leitnerUpdates)) {
+    const skillId = String(update.skillId || "");
+    if (!skillId) continue;
+    merged.set(skillId, update.result === "passed" ? "passed" : "failed");
+  }
+
+  return [...merged.entries()].map(([skillId, result]) => ({ skillId, result }));
+}
+
+function buildCaseItemBack({ question, correction, skillLabel }) {
+  return [
+    `Item : ${skillLabel}`,
+    `Question : ${question.text}`,
+    `Réponse attendue : ${correction.expectedAnswer || question.expectedAnswer}`,
+    correction.examStyleCorrection ? `Correction : ${correction.examStyleCorrection}` : "",
+    correction.missingKeywords?.length ? `À revoir : ${correction.missingKeywords.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function normalizeCase(parsed, { subject, subjectId, difficulty }) {
@@ -154,6 +327,64 @@ function normalizeCase(parsed, { subject, subjectId, difficulty }) {
       interpretation: String(item.interpretation || ""),
     })),
     questions,
+  };
+}
+
+function normalizeQcmSet(parsed, { subject, subjectId, difficulty, count }) {
+  if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length < 1) {
+    return fallbackQcmSet({ subject, subjectId, difficulty, count });
+  }
+
+  const skillIds = Object.keys(subject.skills);
+  const questions = parsed.questions.slice(0, count).map((question, index) =>
+    normalizeQcmQuestion(question, { subjectId, skillIds, index }),
+  );
+
+  if (questions.length < count) {
+    const fallback = fallbackQcmSet({ subject, subjectId, difficulty, count });
+    questions.push(...fallback.questions.slice(questions.length, count));
+  }
+
+  return {
+    title: String(parsed.title || `QCM - ${subject.label}`),
+    subject: String(parsed.subject || subject.label),
+    difficulty: String(parsed.difficulty || difficulty),
+    hiddenDiagnosis: "",
+    statement: `Série de ${count} QCM de ${subject.label}.`,
+    biologicalData: [],
+    questions,
+  };
+}
+
+function normalizeQcmQuestion(question, { subjectId, skillIds, index }) {
+  const optionIds = ["A", "B", "C", "D", "E"];
+  const options = optionIds.map((id, optionIndex) => {
+    const source = safeArray(question?.options).find((item) => String(item?.id || "").toUpperCase() === id);
+    return {
+      id,
+      text: String(source?.text || `Proposition ${id}`),
+    };
+  });
+  const validIds = new Set(optionIds);
+  const correctOptionIds = uniqueOptionIds(question?.correctOptionIds).filter((id) => validIds.has(id));
+  const skillId = normalizeRelatedSkill(question?.relatedLeitnerSkills?.[0], subjectId, skillIds, index);
+  const finalCorrectIds = correctOptionIds.length ? correctOptionIds : ["A"];
+
+  return {
+    id: String(question?.id || `q${index + 1}`),
+    type: "qcm",
+    text: String(
+      question?.text ||
+        `Parmi les propositions suivantes concernant ${skillIds[index % Math.max(skillIds.length, 1)] || "cet item"}, laquelle/lesquelles est/sont exacte(s) ?`,
+    ),
+    options,
+    correctOptionIds: finalCorrectIds,
+    expectedAnswer: String(question?.expectedAnswer || finalCorrectIds.join(", ")),
+    explanation: String(question?.explanation || "Correction à revoir dans le référentiel de cours."),
+    keywords: safeArray(question?.keywords).map(String),
+    grading: [{ item: "Réponse exacte", points: 1 }],
+    commonMistakes: safeArray(question?.commonMistakes).map(String),
+    relatedLeitnerSkills: [skillId],
   };
 }
 
@@ -218,58 +449,85 @@ function normalizeCard(card) {
   };
 }
 
-function fallbackCase({ subject, subjectId, difficulty }) {
-  const baseSkill = `${subjectId}.${Object.keys(subject.skills)[0] || "competence"}`;
-
-  if (subjectId === "nephrologie") {
+function fallbackQcmSet({ subject, subjectId, difficulty, count }) {
+  const skillEntries = Object.entries(subject.skills);
+  const usableSkills = skillEntries.length ? skillEntries : [["revision", subject.label]];
+  const questions = Array.from({ length: count }, (_, index) => {
+    const [skillKey, skillLabel] = usableSkills[index % usableSkills.length];
+    const relatedSkill = `${subjectId}.${skillKey}`;
     return {
-      title: "Dossier de néphrologie - Insuffisance rénale chronique",
-      subject: subject.label,
-      difficulty,
-      hiddenDiagnosis: "Insuffisance rénale chronique compliquée",
-      statement:
-        "Un homme de 68 ans, diabétique de type 2 et hypertendu, consulte pour asthénie progressive, prurit et œdèmes des membres inférieurs. Son traitement comporte metformine, ramipril et hydrochlorothiazide. Le bilan biologique objective une altération chronique de la fonction rénale.",
-      biologicalData: [
-        { label: "Créatinine", value: "245 µmol/L", interpretation: "Insuffisance rénale" },
-        { label: "DFG CKD-EPI", value: "24 mL/min/1,73 m²", interpretation: "IRC stade 4" },
-        { label: "Kaliémie", value: "5,8 mmol/L", interpretation: "Hyperkaliémie" },
-        { label: "Hémoglobine", value: "9,8 g/dL", interpretation: "Anémie" },
-        { label: "Phosphate", value: "1,85 mmol/L", interpretation: "Hyperphosphatémie" },
-        { label: "Calcémie corrigée", value: "2,02 mmol/L", interpretation: "Hypocalcémie" },
-        { label: "PTH", value: "215 pg/mL", interpretation: "Hyperparathyroïdie secondaire" },
+      id: `q${index + 1}`,
+      type: "qcm",
+      text: `Parmi les propositions suivantes concernant ${skillLabel}, laquelle/lesquelles est/sont exacte(s) ?`,
+      options: [
+        { id: "A", text: `${skillLabel} fait partie du programme officiel de cette matière.` },
+        { id: "B", text: "Une réponse non justifiée biologiquement doit toujours être considérée comme suffisante." },
+        { id: "C", text: "Les pièges de surveillance, contre-indication ou interprétation biologique doivent être recherchés." },
+        { id: "D", text: "La formulation du concours privilégie uniquement les définitions isolées." },
+        { id: "E", text: "L'item doit être révisé avec ses applications cliniques, biologiques ou pharmacologiques." },
       ],
-      questions: [
-        question("q1", "Caractériser l'insuffisance rénale et son stade.", "IRC stade 4 selon DFG CKD-EPI à 24 mL/min/1,73 m², à confirmer sur la chronicité et le contexte.", ["IRC", "stade 4", "DFG", "chronicité"], baseSkill),
-        question("q2", "Interpréter les anomalies ioniques et phosphocalciques.", "Hyperkaliémie, hypocalcémie, hyperphosphatémie et hyperparathyroïdie secondaire de l'IRC.", ["hyperkaliémie", "hypocalcémie", "hyperphosphatémie", "PTH"], `${subjectId}.troubles_phosphocalciques`),
-        question("q3", "Caractériser l'anémie et proposer son mécanisme principal.", "Anémie normocytaire arégénérative probable par déficit relatif en érythropoïétine, après élimination des carences.", ["anémie", "normocytaire", "érythropoïétine", "carences"], `${subjectId}.anemie_irc`),
-        question("q4", "Quelles adaptations thérapeutiques sont nécessaires ?", "Arrêt ou réévaluation de metformine selon DFG, gestion hyperkaliémie, adaptation des médicaments néphrotoxiques et surveillance rapprochée.", ["metformine", "DFG", "hyperkaliémie", "surveillance"], "pharmacocinetique.adaptation_posologique"),
-        question("q5", "Quelle prise en charge des troubles phosphocalciques proposer ?", "Restriction phosphorée, chélateurs du phosphate si besoin, correction vitamine D/calcium selon bilan et surveillance Ca/P/PTH.", ["chélateurs", "phosphate", "vitamine D", "surveillance"], `${subjectId}.troubles_phosphocalciques`),
-      ],
+      correctOptionIds: ["A", "C", "E"],
+      expectedAnswer: "A, C, E",
+      explanation:
+        "Le concours teste l'application exacte du programme, avec surveillance, interprétation et pièges plausibles. Les réponses vagues ou uniquement définitionnelles sont insuffisantes.",
+      keywords: [skillLabel],
+      grading: [{ item: "Réponse exacte", points: 1 }],
+      commonMistakes: ["Sélectionner une proposition vague", "Oublier la surveillance ou l'interprétation biologique"],
+      relatedLeitnerSkills: [relatedSkill],
     };
-  }
+  });
 
   return {
-    title: `Dossier de ${subject.label} - Polyarthrite rhumatoïde`,
+    title: `QCM - ${subject.label}`,
     subject: subject.label,
     difficulty,
-    hiddenDiagnosis: "Polyarthrite rhumatoïde",
-    statement:
-      "Une femme de 45 ans est adressée pour douleurs articulaires symétriques des mains et poignets depuis quatre mois, avec dérouillage matinal supérieur à une heure. L'examen retrouve une tuméfaction douloureuse des MCP et IPP. Un bilan immunologique et inflammatoire est réalisé.",
-    biologicalData: [
-      { label: "CRP", value: "28 mg/L", interpretation: "Syndrome inflammatoire" },
-      { label: "VS", value: "52 mm", interpretation: "Inflammation" },
-      { label: "Facteur rhumatoïde", value: "Positif 86 UI/mL", interpretation: "Auto-anticorps compatible" },
-      { label: "Anti-CCP", value: "Positif > 200 UI/mL", interpretation: "Très spécifique de PR" },
-      { label: "Hémoglobine", value: "11,2 g/dL", interpretation: "Anémie inflammatoire possible" },
-    ],
-    questions: [
-      question("q1", "Quel est le diagnostic le plus probable ? Justifier.", "Polyarthrite rhumatoïde débutante devant arthrites symétriques des mains, dérouillage matinal, syndrome inflammatoire, facteur rhumatoïde et anti-CCP positifs.", ["polyarthrite rhumatoïde", "symétrique", "CRP", "anti-CCP", "facteur rhumatoïde"], `${subjectId}.polyarthrite_rhumatoide_diagnostic`),
-      question("q2", "Quel est l'intérêt diagnostique des anticorps anti-CCP ?", "Les anti-CCP ont une forte spécificité diagnostique et une valeur pronostique dans la polyarthrite rhumatoïde.", ["anti-CCP", "spécificité", "diagnostique", "pronostique"], `${subjectId}.anti_ccp`),
-      question("q3", "Quel traitement de fond proposer en première intention et selon quelles modalités ?", "Méthotrexate en première intention, administration hebdomadaire, supplémentation en acide folique, surveillance NFS, transaminases et fonction rénale.", ["méthotrexate", "hebdomadaire", "acide folique", "NFS", "transaminases"], `${subjectId}.methotrexate`),
-      question("q4", "Une cytopénie apparaît sous traitement. Quelle cause probable et quelle prévention ?", "Toxicité hématologique du méthotrexate favorisée par absence d'acide folique, surdosage ou insuffisance rénale ; prévention par folates et surveillance biologique.", ["cytopénie", "méthotrexate", "acide folique", "surveillance"], `${subjectId}.methotrexate`),
-      question("q5", "Avant adalimumab, quelle infection bactérienne rechercher et par quel test ?", "Rechercher une tuberculose latente avant anti-TNF, par interrogatoire, radiographie thoracique et test IGRA type Quantiferon.", ["adalimumab", "anti-TNF", "tuberculose", "IGRA", "Quantiferon"], `${subjectId}.anti_tnf`),
-    ],
+    hiddenDiagnosis: "",
+    statement: `Série de ${count} QCM de ${subject.label}.`,
+    biologicalData: [],
+    questions,
   };
+}
+
+function fallbackCase({ subject, subjectId, difficulty }) {
+  const skillEntries = Object.entries(subject.skills);
+  const selectedSkills = skillEntries.length ? skillEntries.slice(0, 5) : [["revision", subject.label]];
+
+  return {
+    title: `Dossier de ${subject.label} - Synthèse d'entraînement`,
+    subject: subject.label,
+    difficulty,
+    hiddenDiagnosis: "Synthèse transversale d'internat",
+    statement:
+      `Un étudiant traite un dossier transversal de ${subject.label}. Les données doivent être interprétées de façon structurée, avec justification biologique, pharmacologique ou méthodologique selon les items concernés.`,
+    biologicalData: [
+      { label: "Paramètre principal", value: "Anormal", interpretation: "À relier à l'item demandé" },
+      { label: "Contrôle qualité", value: "Conforme", interpretation: "Résultat interprétable" },
+      { label: "Contexte clinique", value: "Compatible", interpretation: "Orientation diagnostique ou thérapeutique à discuter" },
+      { label: "Surveillance", value: "Nécessaire", interpretation: "Suivi biologique ou clinique attendu" },
+      { label: "Risque", value: "Présent", interpretation: "Piège de concours à identifier" },
+    ],
+    questions: selectedSkills.map(([skillKey, skillLabel], index) =>
+      question(
+        `q${index + 1}`,
+        `Présenter les points indispensables à connaître concernant : ${skillLabel}.`,
+        `${skillLabel} doit être traité avec définition précise, mécanisme, intérêt biologique ou thérapeutique, pièges de concours et surveillance quand elle est pertinente.`,
+        [skillLabel, "mécanisme", "surveillance", "piège"],
+        `${subjectId}.${skillKey}`,
+      ),
+    ),
+  };
+}
+
+function uniqueOptionIds(value) {
+  return [...new Set(safeArray(value).map((id) => String(id).trim().toUpperCase()).filter(Boolean))];
+}
+
+function normalizeRelatedSkill(skillId, subjectId, skillIds, index) {
+  const fallbackSkill = skillIds[index % Math.max(skillIds.length, 1)] || "revision";
+  const candidate = String(skillId || "");
+  if (candidate.startsWith(`${subjectId}.`)) return candidate;
+  if (skillIds.includes(candidate)) return `${subjectId}.${candidate}`;
+  return `${subjectId}.${fallbackSkill}`;
 }
 
 function question(id, text, expectedAnswer, keywords, skillId) {

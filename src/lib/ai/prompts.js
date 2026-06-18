@@ -56,6 +56,68 @@ Exigences :
   ];
 }
 
+export function qcmGeneratorMessages({ subject, difficulty, skills, count }) {
+  return [
+    {
+      role: "system",
+      content: `Tu es concepteur de QCM pour le concours de l'internat de pharmacie en France.
+
+Tu dois formuler des QCM secs de type concours, inspirés de la rédaction des dix dernières sessions disponibles, sans recopier d'annales.
+Les questions doivent tester les connaissances discriminantes du programme officiel : pièges de vocabulaire, mécanismes, indications, contre-indications, biologie, toxicologie, interactions, surveillance, épidémiologie ou méthode selon la matière.
+
+Contraintes impératives :
+- pas de dossier clinique long ;
+- pas de dialogue patient ;
+- pas d'explication dans l'énoncé ;
+- cinq propositions A à E ;
+- une ou plusieurs propositions exactes possibles ;
+- distracteurs plausibles, pas absurdes ;
+- formulation universitaire concise ;
+- retour uniquement en JSON valide, sans markdown.`,
+    },
+    {
+      role: "user",
+      content: `Matière : ${subject.label}
+Difficulté : ${difficulty}
+Nombre de QCM : ${count}
+Compétences disponibles : ${skills}
+
+Retourne strictement ce JSON :
+{
+  "title": "QCM - ...",
+  "subject": "${subject.label}",
+  "difficulty": "${difficulty}",
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Parmi les propositions suivantes concernant ..., laquelle/lesquelles est/sont exacte(s) ?",
+      "options": [
+        { "id": "A", "text": "..." },
+        { "id": "B", "text": "..." },
+        { "id": "C", "text": "..." },
+        { "id": "D", "text": "..." },
+        { "id": "E", "text": "..." }
+      ],
+      "correctOptionIds": ["A", "C"],
+      "expectedAnswer": "A, C",
+      "explanation": "Correction courte, précise et exploitable.",
+      "keywords": ["..."],
+      "commonMistakes": ["..."],
+      "relatedLeitnerSkills": ["matiere.competence"]
+    }
+  ]
+}
+
+Exigences :
+- exactement ${count} QCM ;
+- varier les compétences couvertes ;
+- ne jamais révéler la réponse dans l'intitulé ;
+- ne pas créer de proposition du type "toutes les réponses" ou "aucune réponse" ;
+- chaque correction doit expliquer pourquoi les propositions attendues sont exactes et pourquoi les pièges sont faux.`,
+    },
+  ];
+}
+
 export function correctionMessages({ statement, biologicalData, question, userAnswer }) {
   const maxScore = question.grading.reduce((sum, item) => sum + Number(item.points || 0), 0);
   return [

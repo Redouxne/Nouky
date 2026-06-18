@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { getSkillLabel } from "@/lib/internat-program";
+import { getSkillLabel, INTERNAT_PROGRAM } from "@/lib/internat-program";
 import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -56,6 +56,8 @@ export async function GET() {
       front: card.front,
     }));
 
+  const masteryBySubject = buildMasteryBySubject({ answers, cards });
+
   return Response.json({
     caseCount,
     answerCount: answers.length,
@@ -64,5 +66,110 @@ export async function GET() {
     totalCards,
     weakSubjects,
     weakSkills,
+    masteryBySubject,
   });
+}
+
+function buildMasteryBySubject({ answers, cards }) {
+  const answerSignals = collectAnswerSignals(answers);
+  const cardSignals = collectCardSignals(cards);
+
+  return Object.entries(INTERNAT_PROGRAM).map(([subjectId, subject]) => {
+    const items = Object.entries(subject.skills).map(([skillKey, skillLabel]) => {
+      const skillId = `${subjectId}.${skillKey}`;
+      const answerSignal = answerSignals.get(skillId) || { attempts: 0, passed: 0, failed: 0 };
+      const cardSignal = cardSignals.get(skillId);
+      const status = getMasteryStatus(answerSignal, cardSignal);
+      return {
+        skillId,
+        label: skillLabel,
+        status,
+        attempts: answerSignal.attempts,
+        box: cardSignal?.box || null,
+        dueAt: cardSignal?.dueAt || null,
+      };
+    });
+    const counts = {
+      tres_bien_maitrise: 0,
+      maitrise: 0,
+      a_revoir: 0,
+      jamais_vu: 0,
+    };
+    for (const item of items) counts[item.status] += 1;
+
+    return {
+      subjectId,
+      label: subject.label,
+      section: subject.section,
+      total: items.length,
+      counts,
+      items,
+    };
+  });
+}
+
+function collectAnswerSignals(answers) {
+  const signals = new Map();
+  for (const answer of answers) {
+    const correction = parseCorrection(answer.correctionJson);
+    for (const update of correction.leitnerUpdates || []) {
+      const skillId = normalizeKnownSkillId(update.skillId);
+      if (!skillId) continue;
+      const current = signals.get(skillId) || { attempts: 0, passed: 0, failed: 0 };
+      current.attempts += 1;
+      if (update.result === "passed") current.passed += 1;
+      else current.failed += 1;
+      signals.set(skillId, current);
+    }
+  }
+  return signals;
+}
+
+function collectCardSignals(cards) {
+  const signals = new Map();
+  for (const card of cards) {
+    const skillId = normalizeKnownSkillId(card.skillId);
+    if (!skillId) continue;
+    const current = signals.get(skillId);
+    if (!current || card.box < current.box || card.failureCount > current.failureCount) {
+      signals.set(skillId, {
+        box: card.box,
+        failureCount: card.failureCount,
+        successCount: card.successCount,
+        dueAt: card.dueAt,
+      });
+    }
+  }
+  return signals;
+}
+
+function getMasteryStatus(answerSignal, cardSignal) {
+  if (!answerSignal.attempts && !cardSignal) return "jamais_vu";
+  if (cardSignal) {
+    if (cardSignal.box >= 8 && cardSignal.successCount >= cardSignal.failureCount) return "tres_bien_maitrise";
+    if (cardSignal.box >= 5 && cardSignal.successCount >= Math.max(1, cardSignal.failureCount)) return "maitrise";
+    return "a_revoir";
+  }
+
+  const rate = answerSignal.passed / Math.max(1, answerSignal.attempts);
+  if (answerSignal.attempts >= 3 && rate >= 0.85) return "tres_bien_maitrise";
+  if (rate >= 0.6) return "maitrise";
+  return "a_revoir";
+}
+
+function parseCorrection(value) {
+  try {
+    return JSON.parse(value || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function normalizeKnownSkillId(value) {
+  const skillId = String(value || "");
+  if (!skillId.includes(".")) return null;
+  const [subjectId, ...skillParts] = skillId.split(".");
+  const skillKey = skillParts.join("_");
+  if (INTERNAT_PROGRAM[subjectId]?.skills?.[skillKey]) return `${subjectId}.${skillKey}`;
+  return null;
 }

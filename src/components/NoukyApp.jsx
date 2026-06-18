@@ -2,11 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PROGRAM_OPTIONS } from "@/lib/internat-program";
+import { getProgramsByExamType } from "@/lib/internat-program";
 
 const DIFFICULTIES = ["facile", "intermédiaire", "difficile"];
+const QCM_PROGRAM_OPTIONS = getProgramsByExamType("qcm");
+const CASE_PROGRAM_OPTIONS = getProgramsByExamType("dossier_clinique");
+const DEFAULT_CLINICAL_SUBJECT = "sciences_medicament_pharmacologie_generale";
+const DEFAULT_QCM_SUBJECT = QCM_PROGRAM_OPTIONS[0]?.id || DEFAULT_CLINICAL_SUBJECT;
+const MASTERY_LABELS = {
+  tres_bien_maitrise: "Très bien maîtrisé",
+  maitrise: "Maîtrisé",
+  a_revoir: "À revoir",
+  jamais_vu: "Jamais vu",
+};
 const TABS = [
   { id: "cases", label: "Dossiers" },
+  { id: "qcm", label: "QCM" },
   { id: "leitner", label: "Révisions Leitner" },
   { id: "progress", label: "Progression" },
   { id: "mock", label: "Concours blanc" },
@@ -35,12 +46,18 @@ function formatScore(score, maxScore) {
 export default function NoukyApp({ user }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("cases");
-  const [subjectId, setSubjectId] = useState("rhumatologie");
+  const [caseSubjectId, setCaseSubjectId] = useState(DEFAULT_CLINICAL_SUBJECT);
+  const [qcmSubjectId, setQcmSubjectId] = useState(DEFAULT_QCM_SUBJECT);
   const [difficulty, setDifficulty] = useState("intermédiaire");
   const [caseSession, setCaseSession] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answerDraft, setAnswerDraft] = useState("");
   const [corrections, setCorrections] = useState({});
+  const [qcmSession, setQcmSession] = useState(null);
+  const [currentQcmIndex, setCurrentQcmIndex] = useState(0);
+  const [qcmSelections, setQcmSelections] = useState({});
+  const [qcmCorrections, setQcmCorrections] = useState({});
+  const [qcmCount, setQcmCount] = useState(10);
   const [leitnerCards, setLeitnerCards] = useState([]);
   const [activeCardIndex, setActiveCardIndex] = useState(0);
   const [showBack, setShowBack] = useState(false);
@@ -51,6 +68,7 @@ export default function NoukyApp({ user }) {
   const [error, setError] = useState("");
 
   const currentQuestion = caseSession?.questions?.[currentQuestionIndex];
+  const currentQcmQuestion = qcmSession?.questions?.[currentQcmIndex];
   const totalScore = useMemo(() => {
     return Object.values(corrections).reduce(
       (acc, correction) => ({
@@ -60,6 +78,15 @@ export default function NoukyApp({ user }) {
       { score: 0, maxScore: 0 },
     );
   }, [corrections]);
+  const qcmTotalScore = useMemo(() => {
+    return Object.values(qcmCorrections).reduce(
+      (acc, correction) => ({
+        score: acc.score + Number(correction.score || 0),
+        maxScore: acc.maxScore + Number(correction.maxScore || 0),
+      }),
+      { score: 0, maxScore: 0 },
+    );
+  }, [qcmCorrections]);
 
   useEffect(() => {
     if (activeTab === "leitner") loadDueCards();
@@ -80,7 +107,7 @@ export default function NoukyApp({ user }) {
     try {
       const data = await fetchJson("/api/cases/generate", {
         method: "POST",
-        body: JSON.stringify({ subjectId, difficulty }),
+        body: JSON.stringify({ subjectId: caseSubjectId, difficulty }),
       });
       setCaseSession(data.caseSession);
     } catch (err) {
@@ -110,6 +137,65 @@ export default function NoukyApp({ user }) {
         [currentQuestion.id]: data.correction,
       }));
       setAnswerDraft("");
+      setProgress(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function generateQcm() {
+    setLoading("qcm");
+    setError("");
+    setQcmCorrections({});
+    setQcmSelections({});
+    setCurrentQcmIndex(0);
+    try {
+      const data = await fetchJson("/api/qcm/generate", {
+        method: "POST",
+        body: JSON.stringify({ subjectId: qcmSubjectId, difficulty, count: qcmCount }),
+      });
+      setQcmSession(data.qcmSession);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function toggleQcmOption(questionId, optionId) {
+    setQcmSelections((current) => {
+      const existing = current[questionId] || [];
+      const next = existing.includes(optionId)
+        ? existing.filter((item) => item !== optionId)
+        : [...existing, optionId].sort();
+      return { ...current, [questionId]: next };
+    });
+  }
+
+  async function submitQcmAnswer(event) {
+    event.preventDefault();
+    if (!qcmSession || !currentQcmQuestion) return;
+
+    const selectedOptionIds = qcmSelections[currentQcmQuestion.id] || [];
+    if (!selectedOptionIds.length) return;
+
+    setLoading("qcm-answer");
+    setError("");
+    try {
+      const data = await fetchJson("/api/qcm/answer", {
+        method: "POST",
+        body: JSON.stringify({
+          caseSessionId: qcmSession.id,
+          questionId: currentQcmQuestion.id,
+          selectedOptionIds,
+        }),
+      });
+      setQcmCorrections((current) => ({
+        ...current,
+        [currentQcmQuestion.id]: data.correction,
+      }));
       setProgress(null);
     } catch (err) {
       setError(err.message);
@@ -172,7 +258,7 @@ export default function NoukyApp({ user }) {
     setLoading("mock");
     setError("");
     try {
-      const subjectIds = PROGRAM_OPTIONS.slice(0, mockCount).map((item) => item.id);
+      const subjectIds = CASE_PROGRAM_OPTIONS.slice(0, mockCount).map((item) => item.id);
       const data = await fetchJson("/api/mock-exam/generate", {
         method: "POST",
         body: JSON.stringify({ subjectIds, difficulty, count: mockCount }),
@@ -213,7 +299,7 @@ export default function NoukyApp({ user }) {
         <div>
           <div className="eyebrow">Préparation concours</div>
           <h1>Dossiers thérapeutiques et biologiques</h1>
-          <p>Anki + annales + correction exigeante pour l'internat de pharmacie.</p>
+          <p>QCM, dossiers, Leitner et progression par item pour l'internat de pharmacie.</p>
         </div>
       </section>
 
@@ -244,11 +330,34 @@ export default function NoukyApp({ user }) {
           setAnswerDraft={setAnswerDraft}
           setCurrentQuestionIndex={setCurrentQuestionIndex}
           setDifficulty={setDifficulty}
-          setSubjectId={setSubjectId}
-          subjectId={subjectId}
+          setSubjectId={setCaseSubjectId}
+          subjectId={caseSubjectId}
+          subjectOptions={CASE_PROGRAM_OPTIONS}
           submitAnswer={submitAnswer}
           totalScore={totalScore}
           generateCase={generateCase}
+        />
+      ) : null}
+
+      {activeTab === "qcm" ? (
+        <QcmTab
+          corrections={qcmCorrections}
+          currentQuestion={currentQcmQuestion}
+          currentQuestionIndex={currentQcmIndex}
+          difficulty={difficulty}
+          generateQcm={generateQcm}
+          loading={loading}
+          qcmCount={qcmCount}
+          qcmSession={qcmSession}
+          selections={qcmSelections}
+          setCurrentQuestionIndex={setCurrentQcmIndex}
+          setDifficulty={setDifficulty}
+          setQcmCount={setQcmCount}
+          setSubjectId={setQcmSubjectId}
+          subjectId={qcmSubjectId}
+          submitAnswer={submitQcmAnswer}
+          toggleOption={toggleQcmOption}
+          totalScore={qcmTotalScore}
         />
       ) : null}
 
@@ -299,6 +408,7 @@ function CasesTab(props) {
     setDifficulty,
     setSubjectId,
     subjectId,
+    subjectOptions,
     submitAnswer,
     totalScore,
     generateCase,
@@ -310,7 +420,7 @@ function CasesTab(props) {
         <label>
           Matière
           <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
-            {PROGRAM_OPTIONS.map((option) => (
+            {subjectOptions.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
           </select>
@@ -400,6 +510,144 @@ function CasesTab(props) {
   );
 }
 
+function QcmTab(props) {
+  const {
+    corrections,
+    currentQuestion,
+    currentQuestionIndex,
+    difficulty,
+    generateQcm,
+    loading,
+    qcmCount,
+    qcmSession,
+    selections,
+    setCurrentQuestionIndex,
+    setDifficulty,
+    setQcmCount,
+    setSubjectId,
+    subjectId,
+    submitAnswer,
+    toggleOption,
+    totalScore,
+  } = props;
+  const selected = currentQuestion ? selections[currentQuestion.id] || [] : [];
+  const currentCorrection = currentQuestion ? corrections[currentQuestion.id] : null;
+
+  return (
+    <section className="tab-panel">
+      <div className="control-grid qcm-controls">
+        <label>
+          Matière
+          <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+            {QCM_PROGRAM_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Difficulté
+          <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+            {DIFFICULTIES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          Nombre
+          <select value={qcmCount} onChange={(event) => setQcmCount(Number(event.target.value))}>
+            {[5, 10, 15, 20].map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <button className="primary-button" onClick={generateQcm} disabled={loading === "qcm"}>
+          {loading === "qcm" ? "Génération..." : "Générer les QCM"}
+        </button>
+      </div>
+
+      {!qcmSession ? (
+        <div className="empty-state">Sélectionne une matière puis génère une série de QCM.</div>
+      ) : (
+        <div className="case-layout">
+          <article className="panel qcm-document">
+            <div className="panel-header">
+              <div>
+                <div className="eyebrow">{qcmSession.subject}</div>
+                <h2>{qcmSession.title}</h2>
+              </div>
+              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+            </div>
+            <div className="qcm-question-list">
+              {qcmSession.questions.map((question, index) => (
+                <button
+                  key={question.id}
+                  className={`question-nav ${index === currentQuestionIndex ? "active" : ""} ${corrections[question.id] ? "done" : ""}`}
+                  onClick={() => setCurrentQuestionIndex(index)}
+                  type="button"
+                >
+                  Q{index + 1} · {corrections[question.id] ? formatScore(corrections[question.id].score, corrections[question.id].maxScore) : `${question.maxScore} pt`}
+                </button>
+              ))}
+            </div>
+          </article>
+
+          <aside className="panel question-panel">
+            <div className="panel-header">
+              <h2>Question {currentQuestionIndex + 1}</h2>
+              <span className="counter">{currentQuestionIndex + 1}/{qcmSession.questions.length}</span>
+            </div>
+            {currentQuestion ? (
+              <form className="qcm-form" onSubmit={submitAnswer}>
+                <p className="qcm-stem">{currentQuestion.text}</p>
+                <div className="option-list">
+                  {currentQuestion.options.map((option) => (
+                    <label
+                      className={`option-row ${selected.includes(option.id) ? "selected" : ""}`}
+                      key={option.id}
+                    >
+                      <input
+                        checked={selected.includes(option.id)}
+                        disabled={Boolean(currentCorrection) || loading === "qcm-answer"}
+                        onChange={() => toggleOption(currentQuestion.id, option.id)}
+                        type="checkbox"
+                      />
+                      <span className="option-letter">{option.id}</span>
+                      <span>{option.text}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  className="primary-button"
+                  disabled={loading === "qcm-answer" || !selected.length || Boolean(currentCorrection)}
+                >
+                  {currentCorrection ? "Corrigé" : loading === "qcm-answer" ? "Correction..." : "Valider"}
+                </button>
+              </form>
+            ) : null}
+
+            {currentCorrection ? <QcmCorrectionBlock correction={currentCorrection} /> : null}
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function QcmCorrectionBlock({ correction }) {
+  return (
+    <div className="correction-block">
+      <div className={`status ${correction.status}`}>{correction.status}</div>
+      <h3>Correction QCM</h3>
+      <p><strong>Score :</strong> {formatScore(correction.score, correction.maxScore)}</p>
+      <p><strong>Réponse donnée :</strong> {correction.selectedOptionIds?.join(", ") || "Aucune"}</p>
+      <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
+      {correction.majorErrors?.length ? (
+        <p><strong>Propositions fausses cochées :</strong> {correction.majorErrors.join(" ; ")}</p>
+      ) : null}
+      {correction.missingKeywords?.length ? (
+        <p><strong>Propositions exactes oubliées :</strong> {correction.missingKeywords.join(", ")}</p>
+      ) : null}
+      <p><strong>Explication :</strong> {correction.examStyleCorrection}</p>
+    </div>
+  );
+}
+
 function CorrectionBlock({ correction }) {
   return (
     <div className="correction-block">
@@ -426,7 +674,7 @@ function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCard
       <div className="section-header">
         <div>
           <h2>Révisions Leitner</h2>
-          <p>Cartes dues aujourd'hui, issues des erreurs de dossiers.</p>
+          <p>Cartes dues aujourd'hui, issues des items travaillés en QCM et dossiers.</p>
         </div>
         <button className="secondary-button" onClick={reload} disabled={loading === "leitner"}>Actualiser</button>
       </div>
@@ -489,10 +737,15 @@ function ProgressTab({ loading, progress, reload }) {
         <>
           <div className="stats-grid">
             <Metric label="Score moyen" value={`${progress.averageScore}%`} />
-            <Metric label="Dossiers réalisés" value={progress.caseCount} />
+            <Metric label="Sessions créées" value={progress.caseCount} />
             <Metric label="Réponses corrigées" value={progress.answerCount} />
             <Metric label="Cartes dues" value={progress.dueCards} />
             <Metric label="Cartes totales" value={progress.totalCards} />
+          </div>
+          <div className="mastery-grid">
+            {progress.masteryBySubject?.map((subject) => (
+              <ProgressPieCard key={subject.subjectId} subject={subject} />
+            ))}
           </div>
           <div className="two-columns">
             <ListPanel title="Matières faibles" items={progress.weakSubjects} render={(item) => `${item.subject} · ${item.rate}%`} />
@@ -550,6 +803,54 @@ function Metric({ label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function ProgressPieCard({ subject }) {
+  const mastered =
+    Number(subject.counts.tres_bien_maitrise || 0) + Number(subject.counts.maitrise || 0);
+  const masteredRate = subject.total ? Math.round((mastered / subject.total) * 100) : 0;
+  return (
+    <article className="panel mastery-card">
+      <div className="mastery-card-header">
+        <div>
+          <span className="eyebrow">Section {subject.section}</span>
+          <h3>{subject.label}</h3>
+        </div>
+        <strong>{masteredRate}%</strong>
+      </div>
+      <div className="mastery-body">
+        <div className="pie-chart" style={buildPieStyle(subject.counts, subject.total)}>
+          <span>{subject.total}</span>
+        </div>
+        <div className="legend-list">
+          {Object.entries(MASTERY_LABELS).map(([status, label]) => (
+            <div className="legend-row" key={status}>
+              <span className={`legend-dot ${status}`} />
+              <span>{label}</span>
+              <strong>{subject.counts[status] || 0}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function buildPieStyle(counts, total) {
+  const colors = {
+    tres_bien_maitrise: "#0f7a4f",
+    maitrise: "#2563eb",
+    a_revoir: "#d97706",
+    jamais_vu: "#cbd5e1",
+  };
+  if (!total) return { background: colors.jamais_vu };
+  let cursor = 0;
+  const segments = Object.keys(MASTERY_LABELS).map((status) => {
+    const start = cursor;
+    cursor += ((counts[status] || 0) / total) * 100;
+    return `${colors[status]} ${start}% ${cursor}%`;
+  });
+  return { background: `conic-gradient(${segments.join(", ")})` };
 }
 
 function ListPanel({ title, items, render }) {
