@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getProgramsByExamType } from "@/lib/internat-program";
 
@@ -43,6 +43,24 @@ function formatScore(score, maxScore) {
   return `${Number(score || 0).toFixed(1).replace(".0", "")}/${Number(maxScore || 0).toFixed(1).replace(".0", "")}`;
 }
 
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.round(Number(totalSeconds || 0)));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function formatSpeedDelta(deltaSeconds) {
+  if (!deltaSeconds) return "stable";
+  const prefix = deltaSeconds > 0 ? "+" : "-";
+  return `${prefix}${formatDuration(Math.abs(deltaSeconds))}`;
+}
+
+function elapsedSeconds(startedAtMs, nowMs = Date.now()) {
+  if (!startedAtMs) return 0;
+  return Math.max(0, Math.round((nowMs - startedAtMs) / 1000));
+}
+
 export default function NoukyApp({ user }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState("cases");
@@ -51,10 +69,14 @@ export default function NoukyApp({ user }) {
   const [difficulty, setDifficulty] = useState("intermédiaire");
   const [caseSession, setCaseSession] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [caseStartedAtMs, setCaseStartedAtMs] = useState(null);
+  const [caseQuestionStartedAtMs, setCaseQuestionStartedAtMs] = useState(null);
   const [answerDraft, setAnswerDraft] = useState("");
   const [corrections, setCorrections] = useState({});
   const [qcmSession, setQcmSession] = useState(null);
   const [currentQcmIndex, setCurrentQcmIndex] = useState(0);
+  const [qcmStartedAtMs, setQcmStartedAtMs] = useState(null);
+  const [qcmQuestionStartedAtMs, setQcmQuestionStartedAtMs] = useState(null);
   const [qcmSelections, setQcmSelections] = useState({});
   const [qcmCorrections, setQcmCorrections] = useState({});
   const [qcmCount, setQcmCount] = useState(10);
@@ -66,6 +88,7 @@ export default function NoukyApp({ user }) {
   const [mockCount, setMockCount] = useState(3);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
+  const [nowMs, setNowMs] = useState(Date.now());
 
   const currentQuestion = caseSession?.questions?.[currentQuestionIndex];
   const currentQcmQuestion = qcmSession?.questions?.[currentQcmIndex];
@@ -93,6 +116,23 @@ export default function NoukyApp({ user }) {
     if (activeTab === "progress") loadProgress();
   }, [activeTab]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (caseSession && currentQuestion && !corrections[currentQuestion.id]) {
+      setCaseQuestionStartedAtMs(Date.now());
+    }
+  }, [caseSession?.id, currentQuestion?.id]);
+
+  useEffect(() => {
+    if (qcmSession && currentQcmQuestion && !qcmCorrections[currentQcmQuestion.id]) {
+      setQcmQuestionStartedAtMs(Date.now());
+    }
+  }, [qcmSession?.id, currentQcmQuestion?.id]);
+
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/auth/signin");
@@ -110,6 +150,9 @@ export default function NoukyApp({ user }) {
         body: JSON.stringify({ subjectId: caseSubjectId, difficulty }),
       });
       setCaseSession(data.caseSession);
+      const startedAt = Date.now();
+      setCaseStartedAtMs(startedAt);
+      setCaseQuestionStartedAtMs(startedAt);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -124,12 +167,14 @@ export default function NoukyApp({ user }) {
     setLoading("answer");
     setError("");
     try {
+      const durationSeconds = elapsedSeconds(caseQuestionStartedAtMs);
       const data = await fetchJson("/api/cases/answer", {
         method: "POST",
         body: JSON.stringify({
           caseSessionId: caseSession.id,
           questionId: currentQuestion.id,
           answer: answerDraft,
+          durationSeconds,
         }),
       });
       setCorrections((current) => ({
@@ -157,6 +202,9 @@ export default function NoukyApp({ user }) {
         body: JSON.stringify({ subjectId: qcmSubjectId, count: qcmCount }),
       });
       setQcmSession(data.qcmSession);
+      const startedAt = Date.now();
+      setQcmStartedAtMs(startedAt);
+      setQcmQuestionStartedAtMs(startedAt);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -184,12 +232,14 @@ export default function NoukyApp({ user }) {
     setLoading("qcm-answer");
     setError("");
     try {
+      const durationSeconds = elapsedSeconds(qcmQuestionStartedAtMs);
       const data = await fetchJson("/api/qcm/answer", {
         method: "POST",
         body: JSON.stringify({
           caseSessionId: qcmSession.id,
           questionId: currentQcmQuestion.id,
           selectedOptionIds,
+          durationSeconds,
         }),
       });
       setQcmCorrections((current) => ({
@@ -276,6 +326,9 @@ export default function NoukyApp({ user }) {
     setCorrections({});
     setAnswerDraft("");
     setCurrentQuestionIndex(0);
+    const startedAt = Date.now();
+    setCaseStartedAtMs(startedAt);
+    setCaseQuestionStartedAtMs(startedAt);
     setActiveTab("cases");
   }
 
@@ -327,6 +380,9 @@ export default function NoukyApp({ user }) {
           currentQuestionIndex={currentQuestionIndex}
           difficulty={difficulty}
           loading={loading}
+          nowMs={nowMs}
+          questionStartedAtMs={caseQuestionStartedAtMs}
+          sessionStartedAtMs={caseStartedAtMs}
           setAnswerDraft={setAnswerDraft}
           setCurrentQuestionIndex={setCurrentQuestionIndex}
           setDifficulty={setDifficulty}
@@ -346,8 +402,11 @@ export default function NoukyApp({ user }) {
           currentQuestionIndex={currentQcmIndex}
           generateQcm={generateQcm}
           loading={loading}
+          nowMs={nowMs}
+          questionStartedAtMs={qcmQuestionStartedAtMs}
           qcmCount={qcmCount}
           qcmSession={qcmSession}
+          sessionStartedAtMs={qcmStartedAtMs}
           selections={qcmSelections}
           setCurrentQuestionIndex={setCurrentQcmIndex}
           setQcmCount={setQcmCount}
@@ -401,6 +460,9 @@ function CasesTab(props) {
     currentQuestionIndex,
     difficulty,
     loading,
+    nowMs,
+    questionStartedAtMs,
+    sessionStartedAtMs,
     setAnswerDraft,
     setCurrentQuestionIndex,
     setDifficulty,
@@ -411,6 +473,8 @@ function CasesTab(props) {
     totalScore,
     generateCase,
   } = props;
+  const currentCorrection = currentQuestion ? corrections[currentQuestion.id] : null;
+  const questionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
 
   return (
     <section className="tab-panel">
@@ -444,7 +508,10 @@ function CasesTab(props) {
                 <div className="eyebrow">{caseSession.subject}</div>
                 <h2>{caseSession.title}</h2>
               </div>
-              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+              <div className="header-metrics">
+                <TimerPill label="Session" seconds={elapsedSeconds(sessionStartedAtMs, nowMs)} />
+                <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+              </div>
             </div>
             <div className="document-body">
               <h3>Énoncé</h3>
@@ -467,7 +534,10 @@ function CasesTab(props) {
           <aside className="panel question-panel">
             <div className="panel-header">
               <h2>Questions</h2>
-              <span className="counter">{currentQuestionIndex + 1}/{caseSession.questions.length}</span>
+              <div className="header-metrics compact">
+                <TimerPill label="Question" seconds={questionDuration} />
+                <span className="counter">{currentQuestionIndex + 1}/{caseSession.questions.length}</span>
+              </div>
             </div>
             <div className="question-list">
               {caseSession.questions.map((question, index) => (
@@ -498,8 +568,8 @@ function CasesTab(props) {
               </form>
             ) : null}
 
-            {currentQuestion && corrections[currentQuestion.id] ? (
-              <CorrectionBlock correction={corrections[currentQuestion.id]} />
+            {currentQuestion && currentCorrection ? (
+              <CorrectionBlock correction={currentCorrection} />
             ) : null}
           </aside>
         </div>
@@ -515,8 +585,11 @@ function QcmTab(props) {
     currentQuestionIndex,
     generateQcm,
     loading,
+    nowMs,
+    questionStartedAtMs,
     qcmCount,
     qcmSession,
+    sessionStartedAtMs,
     selections,
     setCurrentQuestionIndex,
     setQcmCount,
@@ -528,10 +601,22 @@ function QcmTab(props) {
   } = props;
   const selected = currentQuestion ? selections[currentQuestion.id] || [] : [];
   const currentCorrection = currentQuestion ? corrections[currentQuestion.id] : null;
+  const questionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
+  const totalQuestions = qcmSession?.questions?.length || 0;
+  const nextQuestionIndex = totalQuestions
+    ? qcmSession.questions.findIndex((question, index) => index > currentQuestionIndex && !corrections[question.id])
+    : -1;
+  const fallbackNextIndex = currentQuestionIndex + 1 < totalQuestions ? currentQuestionIndex + 1 : -1;
+  const canGoNext = nextQuestionIndex !== -1 || fallbackNextIndex !== -1;
+
+  function goToNextQuestion() {
+    const targetIndex = nextQuestionIndex !== -1 ? nextQuestionIndex : fallbackNextIndex;
+    if (targetIndex !== -1) setCurrentQuestionIndex(targetIndex);
+  }
 
   return (
     <section className="tab-panel">
-      <div className="control-grid qcm-controls">
+      <div className="qcm-setup-bar">
         <label>
           Matière
           <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
@@ -546,8 +631,8 @@ function QcmTab(props) {
             {[5, 10, 15, 20].map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </label>
-        <button className="primary-button" onClick={generateQcm} disabled={loading === "qcm"}>
-          {loading === "qcm" ? "Génération..." : "Générer les QCM"}
+        <button className="secondary-button" onClick={generateQcm} disabled={loading === "qcm"}>
+          {loading === "qcm" ? "Génération..." : qcmSession ? "Nouvelle série" : "Générer"}
         </button>
       </div>
 
@@ -561,7 +646,10 @@ function QcmTab(props) {
                 <div className="eyebrow">{qcmSession.subject}</div>
                 <h2>{qcmSession.title}</h2>
               </div>
-              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+              <div className="header-metrics">
+                <TimerPill label="Session" seconds={elapsedSeconds(sessionStartedAtMs, nowMs)} />
+                <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+              </div>
             </div>
             <div className="qcm-question-list">
               {qcmSession.questions.map((question, index) => (
@@ -580,7 +668,10 @@ function QcmTab(props) {
           <aside className="panel question-panel">
             <div className="panel-header">
               <h2>Question {currentQuestionIndex + 1}</h2>
-              <span className="counter">{currentQuestionIndex + 1}/{qcmSession.questions.length}</span>
+              <div className="header-metrics compact">
+                <TimerPill label="Question" seconds={questionDuration} />
+                <span className="counter">{currentQuestionIndex + 1}/{qcmSession.questions.length}</span>
+              </div>
             </div>
             {currentQuestion ? (
               <form className="qcm-form" onSubmit={submitAnswer}>
@@ -602,12 +693,22 @@ function QcmTab(props) {
                     </label>
                   ))}
                 </div>
-                <button
-                  className="primary-button"
-                  disabled={loading === "qcm-answer" || !selected.length || Boolean(currentCorrection)}
-                >
-                  {currentCorrection ? "Corrigé" : loading === "qcm-answer" ? "Correction..." : "Valider"}
-                </button>
+                <div className="qcm-actions">
+                  <button
+                    className="primary-button"
+                    disabled={loading === "qcm-answer" || !selected.length || Boolean(currentCorrection)}
+                  >
+                    {currentCorrection ? "Corrigé" : loading === "qcm-answer" ? "Correction..." : "Valider"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={!currentCorrection || !canGoNext}
+                    onClick={goToNextQuestion}
+                    type="button"
+                  >
+                    Question suivante
+                  </button>
+                </div>
               </form>
             ) : null}
 
@@ -625,6 +726,9 @@ function QcmCorrectionBlock({ correction }) {
       <div className={`status ${correction.status}`}>{correction.status}</div>
       <h3>Correction QCM</h3>
       <p><strong>Score :</strong> {formatScore(correction.score, correction.maxScore)}</p>
+      {correction.durationSeconds ? (
+        <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
+      ) : null}
       <p><strong>Réponse donnée :</strong> {correction.selectedOptionIds?.join(", ") || "Aucune"}</p>
       <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
       {correction.majorErrors?.length ? (
@@ -644,6 +748,9 @@ function CorrectionBlock({ correction }) {
       <div className={`status ${correction.status}`}>{correction.status}</div>
       <h3>Correction concours</h3>
       <p><strong>Score estimé :</strong> {formatScore(correction.score, correction.maxScore)}</p>
+      {correction.durationSeconds ? (
+        <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
+      ) : null}
       <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
       <p><strong>Correction type :</strong> {correction.examStyleCorrection}</p>
       {correction.missingKeywords?.length ? (
@@ -654,6 +761,15 @@ function CorrectionBlock({ correction }) {
       ) : null}
       <p><strong>Appréciation :</strong> {correction.feedback}</p>
     </div>
+  );
+}
+
+function TimerPill({ label, seconds }) {
+  return (
+    <span className="timer-pill">
+      <span>{label}</span>
+      <strong>{formatDuration(seconds)}</strong>
+    </span>
   );
 }
 
@@ -712,6 +828,20 @@ function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCard
 }
 
 function ProgressTab({ loading, progress, reload }) {
+  const [selectedMastery, setSelectedMastery] = useState(null);
+  const selectedPanelRef = useRef(null);
+
+  useEffect(() => {
+    if (selectedMastery) {
+      selectedPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedMastery]);
+
+  const selectedSubject = selectedMastery
+    ? progress?.masteryBySubject?.find((subject) => subject.subjectId === selectedMastery.subjectId)
+    : null;
+  const selectedItems = selectedSubject?.items?.filter((item) => item.status === selectedMastery.status) || [];
+
   return (
     <section className="tab-panel">
       <div className="section-header">
@@ -731,10 +861,28 @@ function ProgressTab({ loading, progress, reload }) {
             <Metric label="Réponses corrigées" value={progress.answerCount} />
             <Metric label="Cartes dues" value={progress.dueCards} />
             <Metric label="Cartes totales" value={progress.totalCards} />
+            <Metric label="Temps moyen QCM" value={formatDuration(progress.speedStats?.qcm?.averageSeconds)} />
+            <Metric label="Temps moyen dossier" value={formatDuration(progress.speedStats?.dossier?.averageSeconds)} />
+            <Metric label="Tendance QCM" value={formatSpeedDelta(progress.speedStats?.qcm?.deltaSeconds)} />
+            <Metric label="Tendance dossier" value={formatSpeedDelta(progress.speedStats?.dossier?.deltaSeconds)} />
           </div>
+          <SpeedProgressPanel speedStats={progress.speedStats} />
+          {selectedMastery && selectedSubject ? (
+            <MasteryItemsPanel
+              items={selectedItems}
+              onClose={() => setSelectedMastery(null)}
+              panelRef={selectedPanelRef}
+              status={selectedMastery.status}
+              subject={selectedSubject}
+            />
+          ) : null}
           <div className="mastery-grid">
             {progress.masteryBySubject?.map((subject) => (
-              <ProgressPieCard key={subject.subjectId} subject={subject} />
+              <ProgressPieCard
+                key={subject.subjectId}
+                onSelectStatus={(status) => setSelectedMastery({ subjectId: subject.subjectId, status })}
+                subject={subject}
+              />
             ))}
           </div>
           <div className="two-columns">
@@ -795,7 +943,67 @@ function Metric({ label, value }) {
   );
 }
 
-function ProgressPieCard({ subject }) {
+function SpeedProgressPanel({ speedStats }) {
+  const recent = speedStats?.recent || [];
+  return (
+    <div className="panel speed-panel">
+      <div className="speed-panel-header">
+        <div>
+          <h3>Vitesse</h3>
+          <p>Temps par question sur les dernières réponses chronométrées.</p>
+        </div>
+      </div>
+      {recent.length ? (
+        <div className="speed-list">
+          {recent.map((item, index) => (
+            <div className="speed-row" key={`${item.createdAt}-${index}`}>
+              <span className={`mode-pill ${item.mode}`}>{item.mode === "qcm" ? "QCM" : "Dossier"}</span>
+              <span>{item.subject}</span>
+              <strong>{formatDuration(item.durationSeconds)}</strong>
+              <small>{item.scoreRate}%</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="speed-empty">Aucune réponse chronométrée pour l'instant.</p>
+      )}
+    </div>
+  );
+}
+
+function MasteryItemsPanel({ items, onClose, panelRef, status, subject }) {
+  return (
+    <section className="panel mastery-items-panel" ref={panelRef}>
+      <div className="mastery-items-header">
+        <div>
+          <span className="eyebrow">{subject.label}</span>
+          <h3>{MASTERY_LABELS[status]}</h3>
+        </div>
+        <button className="secondary-button small" onClick={onClose} type="button">Fermer</button>
+      </div>
+      {items.length ? (
+        <div className="mastery-items-list">
+          {items.map((item) => (
+            <article className="mastery-item-row" key={item.skillId}>
+              <div>
+                <strong>{item.label}</strong>
+                <span>{item.skillId}</span>
+              </div>
+              <div className="mastery-item-meta">
+                <span>{item.attempts} passage(s)</span>
+                <span>{item.box ? `Box ${item.box}` : "Pas de box"}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="speed-empty">Aucun item dans cette catégorie.</p>
+      )}
+    </section>
+  );
+}
+
+function ProgressPieCard({ onSelectStatus, subject }) {
   const mastered =
     Number(subject.counts.tres_bien_maitrise || 0) + Number(subject.counts.maitrise || 0);
   const masteredRate = subject.total ? Math.round((mastered / subject.total) * 100) : 0;
@@ -814,11 +1022,16 @@ function ProgressPieCard({ subject }) {
         </div>
         <div className="legend-list">
           {Object.entries(MASTERY_LABELS).map(([status, label]) => (
-            <div className="legend-row" key={status}>
+            <button
+              className="legend-row legend-button"
+              key={status}
+              onClick={() => onSelectStatus(status)}
+              type="button"
+            >
               <span className={`legend-dot ${status}`} />
               <span>{label}</span>
               <strong>{subject.counts[status] || 0}</strong>
-            </div>
+            </button>
           ))}
         </div>
       </div>

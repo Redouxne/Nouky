@@ -57,6 +57,7 @@ export async function GET() {
     }));
 
   const masteryBySubject = buildMasteryBySubject({ answers, cards });
+  const speedStats = buildSpeedStats(answers);
 
   return Response.json({
     caseCount,
@@ -67,7 +68,70 @@ export async function GET() {
     weakSubjects,
     weakSkills,
     masteryBySubject,
+    speedStats,
   });
+}
+
+function buildSpeedStats(answers) {
+  const timedAnswers = answers
+    .map((answer) => {
+      const correction = parseCorrection(answer.correctionJson);
+      const durationSeconds = normalizeDurationSeconds(correction.durationSeconds);
+      if (!durationSeconds) return null;
+      const mode = answer.caseSession.mode === "qcm" ? "qcm" : "dossier";
+      return {
+        id: answer.id,
+        mode,
+        subject: answer.caseSession.subject,
+        durationSeconds,
+        scoreRate: answer.maxScore ? Math.round((answer.score / answer.maxScore) * 100) : 0,
+        createdAt: answer.createdAt,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    qcm: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "qcm")),
+    dossier: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "dossier")),
+    recent: timedAnswers.slice(0, 12).map((answer) => ({
+      mode: answer.mode,
+      subject: answer.subject,
+      durationSeconds: answer.durationSeconds,
+      scoreRate: answer.scoreRate,
+      createdAt: answer.createdAt,
+    })),
+  };
+}
+
+function summarizeSpeed(items) {
+  if (!items.length) {
+    return {
+      count: 0,
+      averageSeconds: 0,
+      recentAverageSeconds: 0,
+      previousAverageSeconds: 0,
+      deltaSeconds: 0,
+    };
+  }
+
+  const recent = items.slice(0, Math.min(10, items.length));
+  const previous = items.slice(recent.length, recent.length * 2);
+  const averageSeconds = average(items.map((item) => item.durationSeconds));
+  const recentAverageSeconds = average(recent.map((item) => item.durationSeconds));
+  const previousAverageSeconds = previous.length ? average(previous.map((item) => item.durationSeconds)) : 0;
+
+  return {
+    count: items.length,
+    averageSeconds,
+    recentAverageSeconds,
+    previousAverageSeconds,
+    deltaSeconds: previousAverageSeconds ? recentAverageSeconds - previousAverageSeconds : 0,
+  };
+}
+
+function average(values) {
+  if (!values.length) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
 function buildMasteryBySubject({ answers, cards }) {
@@ -163,6 +227,12 @@ function parseCorrection(value) {
   } catch {
     return {};
   }
+}
+
+function normalizeDurationSeconds(value) {
+  const seconds = Math.round(Number(value || 0));
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return Math.min(seconds, 4 * 60 * 60);
 }
 
 function normalizeKnownSkillId(value) {

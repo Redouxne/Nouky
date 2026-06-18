@@ -9,7 +9,7 @@ export async function POST(request) {
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
-    const { caseSessionId, questionId, selectedOptionIds = [] } = await request.json();
+    const { caseSessionId, questionId, selectedOptionIds = [], durationSeconds } = await request.json();
     if (!caseSessionId || !questionId) {
       return Response.json({ error: "QCM incomplet" }, { status: 400 });
     }
@@ -24,19 +24,23 @@ export async function POST(request) {
     if (!question) return Response.json({ error: "Question introuvable" }, { status: 404 });
 
     const correction = correctQcmAnswer({ question, selectedOptionIds });
+    const timedCorrection = {
+      ...correction,
+      durationSeconds: normalizeDurationSeconds(durationSeconds),
+    };
     const savedAnswer = await prisma.answer.create({
       data: {
         userId: session.id,
         caseSessionId: caseSession.id,
         questionId,
-        userAnswer: JSON.stringify(correction.selectedOptionIds),
-        correctionJson: JSON.stringify(correction),
-        score: correction.score,
-        maxScore: correction.maxScore,
+        userAnswer: JSON.stringify(timedCorrection.selectedOptionIds),
+        correctionJson: JSON.stringify(timedCorrection),
+        score: timedCorrection.score,
+        maxScore: timedCorrection.maxScore,
       },
     });
 
-    const cards = generateQcmLeitnerCards({ caseSession, question, correction });
+    const cards = generateQcmLeitnerCards({ caseSession, question, correction: timedCorrection });
     for (const card of cards) {
       await prisma.leitnerCard.upsert({
         where: {
@@ -72,11 +76,17 @@ export async function POST(request) {
 
     return Response.json({
       answerId: savedAnswer.id,
-      correction,
+      correction: timedCorrection,
       createdCards: cards.length,
       qcmSession: publicCasePayload(caseSession),
     });
   } catch (error) {
     return Response.json({ error: error.message || "Erreur correction QCM" }, { status: 500 });
   }
+}
+
+function normalizeDurationSeconds(value) {
+  const seconds = Math.round(Number(value || 0));
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.min(Math.max(seconds, 0), 4 * 60 * 60);
 }

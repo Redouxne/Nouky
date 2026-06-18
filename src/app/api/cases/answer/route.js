@@ -9,7 +9,7 @@ export async function POST(request) {
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
-    const { caseSessionId, questionId, answer } = await request.json();
+    const { caseSessionId, questionId, answer, durationSeconds } = await request.json();
     const userAnswer = String(answer || "").trim();
     if (!caseSessionId || !questionId || !userAnswer) {
       return Response.json({ error: "Réponse incomplète" }, { status: 400 });
@@ -25,7 +25,11 @@ export async function POST(request) {
     if (!question) return Response.json({ error: "Question introuvable" }, { status: 404 });
 
     const correction = await correctAnswer({ caseSession, question, userAnswer });
-    const maxScore = correction.maxScore || totalPoints(question.grading);
+    const timedCorrection = {
+      ...correction,
+      durationSeconds: normalizeDurationSeconds(durationSeconds),
+    };
+    const maxScore = timedCorrection.maxScore || totalPoints(question.grading);
 
     const savedAnswer = await prisma.answer.create({
       data: {
@@ -33,13 +37,13 @@ export async function POST(request) {
         caseSessionId: caseSession.id,
         questionId,
         userAnswer,
-        correctionJson: JSON.stringify(correction),
-        score: correction.score,
+        correctionJson: JSON.stringify(timedCorrection),
+        score: timedCorrection.score,
         maxScore,
       },
     });
 
-    const cards = generateCaseItemLeitnerCards({ caseSession, question, correction });
+    const cards = generateCaseItemLeitnerCards({ caseSession, question, correction: timedCorrection });
     for (const card of cards) {
       await prisma.leitnerCard.upsert({
         where: {
@@ -75,11 +79,17 @@ export async function POST(request) {
 
     return Response.json({
       answerId: savedAnswer.id,
-      correction,
+      correction: timedCorrection,
       createdCards: cards.length,
       caseSession: publicCasePayload(caseSession),
     });
   } catch (error) {
     return Response.json({ error: error.message || "Erreur correction" }, { status: 500 });
   }
+}
+
+function normalizeDurationSeconds(value) {
+  const seconds = Math.round(Number(value || 0));
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.min(Math.max(seconds, 0), 4 * 60 * 60);
 }
