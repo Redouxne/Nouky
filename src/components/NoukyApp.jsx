@@ -154,7 +154,7 @@ export default function NoukyApp({ user }) {
     try {
       const data = await fetchJson("/api/qcm/generate", {
         method: "POST",
-        body: JSON.stringify({ subjectId: qcmSubjectId, difficulty, count: qcmCount }),
+        body: JSON.stringify({ subjectId: qcmSubjectId, count: qcmCount }),
       });
       setQcmSession(data.qcmSession);
     } catch (err) {
@@ -344,14 +344,12 @@ export default function NoukyApp({ user }) {
           corrections={qcmCorrections}
           currentQuestion={currentQcmQuestion}
           currentQuestionIndex={currentQcmIndex}
-          difficulty={difficulty}
           generateQcm={generateQcm}
           loading={loading}
           qcmCount={qcmCount}
           qcmSession={qcmSession}
           selections={qcmSelections}
           setCurrentQuestionIndex={setCurrentQcmIndex}
-          setDifficulty={setDifficulty}
           setQcmCount={setQcmCount}
           setSubjectId={setQcmSubjectId}
           subjectId={qcmSubjectId}
@@ -515,14 +513,12 @@ function QcmTab(props) {
     corrections,
     currentQuestion,
     currentQuestionIndex,
-    difficulty,
     generateQcm,
     loading,
     qcmCount,
     qcmSession,
     selections,
     setCurrentQuestionIndex,
-    setDifficulty,
     setQcmCount,
     setSubjectId,
     subjectId,
@@ -542,12 +538,6 @@ function QcmTab(props) {
             {QCM_PROGRAM_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
-          </select>
-        </label>
-        <label>
-          Difficulté
-          <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
-            {DIFFICULTIES.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
         <label>

@@ -56,13 +56,14 @@ Exigences :
   ];
 }
 
-export function qcmGeneratorMessages({ subject, difficulty, skills, count }) {
+export function qcmGeneratorMessages({ subject, skills, count }) {
   return [
     {
       role: "system",
       content: `Tu es concepteur de QCM pour le concours de l'internat de pharmacie en France.
 
-Tu dois formuler des QCM secs de type concours, inspirés de la rédaction des dix dernières sessions disponibles, sans recopier d'annales.
+Tu dois formuler des QCM secs, exigeants, de niveau concours réel, comparables aux annales et aux questions déjà tombées.
+Tu peux reprendre les thèmes, pièges, tournures et niveaux de détail récurrents des annales, sans recopier mot pour mot un sujet ni inventer une année de session.
 Les questions doivent tester les connaissances discriminantes du programme officiel : pièges de vocabulaire, mécanismes, indications, contre-indications, biologie, toxicologie, interactions, surveillance, épidémiologie ou méthode selon la matière.
 
 Contraintes impératives :
@@ -78,7 +79,7 @@ Contraintes impératives :
     {
       role: "user",
       content: `Matière : ${subject.label}
-Difficulté : ${difficulty}
+Niveau : concours réel, type annales
 Nombre de QCM : ${count}
 Compétences disponibles : ${skills}
 
@@ -86,7 +87,7 @@ Retourne strictement ce JSON :
 {
   "title": "QCM - ...",
   "subject": "${subject.label}",
-  "difficulty": "${difficulty}",
+  "difficulty": "concours",
   "questions": [
     {
       "id": "q1",
@@ -111,6 +112,8 @@ Retourne strictement ce JSON :
 Exigences :
 - exactement ${count} QCM ;
 - varier les compétences couvertes ;
+- privilégier les thèmes et pièges qui ressemblent aux sujets déjà tombés ;
+- niveau difficile par défaut, sans question de cours trop simple ;
 - ne jamais révéler la réponse dans l'intitulé ;
 - ne pas créer de proposition du type "toutes les réponses" ou "aucune réponse" ;
 - chaque correction doit expliquer pourquoi les propositions attendues sont exactes et pourquoi les pièges sont faux.`,

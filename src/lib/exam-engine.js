@@ -109,15 +109,16 @@ export async function generateCaseContent({ subjectId, difficulty = "intermédia
   }
 }
 
-export async function generateQcmContent({ subjectId, difficulty = "intermédiaire", count = 10 }) {
+export async function generateQcmContent({ subjectId, count = 10 }) {
   const subject = getProgramSubject(subjectId);
+  const difficulty = "concours";
   const normalizedCount = Math.min(Math.max(Number(count) || 10, 5), 20);
   const skills = Object.entries(subject.skills)
     .map(([id, label]) => `${subjectId}.${id}: ${label}`)
     .join("\n");
 
   try {
-    const raw = await mistralChat(qcmGeneratorMessages({ subject, difficulty, skills, count: normalizedCount }), {
+    const raw = await mistralChat(qcmGeneratorMessages({ subject, skills, count: normalizedCount }), {
       temperature: 0.45,
       topP: 0.88,
     });

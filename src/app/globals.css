@@ -232,7 +232,7 @@ textarea:disabled {
 }
 
 .qcm-controls {
-  grid-template-columns: minmax(260px, 1fr) minmax(150px, 0.35fr) minmax(120px, 0.2fr) auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(120px, 0.2fr) auto;
 }
 
 label {

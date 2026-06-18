@@ -9,9 +9,8 @@ export async function POST(request) {
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
-    const { subjectId = "sciences_medicament_pharmacologie_generale", difficulty = "intermédiaire", count = 10 } =
-      await request.json();
-    const generated = await generateQcmContent({ subjectId, difficulty, count });
+    const { subjectId = "sciences_medicament_pharmacologie_generale", count = 10 } = await request.json();
+    const generated = await generateQcmContent({ subjectId, count });
     const caseSession = await prisma.caseSession.create({
       data: {
         userId: session.id,
