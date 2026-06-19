@@ -768,6 +768,73 @@ textarea:focus {
   color: var(--primary-strong);
 }
 
+.mode-pill.dossiers {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.mode-pill.exercices {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.annales-dashboard {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.annales-filters {
+  align-items: end;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 0.3fr) minmax(180px, 0.3fr) 1fr;
+  margin-bottom: 16px;
+  padding: 12px;
+}
+
+.annales-list {
+  display: grid;
+  gap: 10px;
+}
+
+.annale-row {
+  align-items: center;
+  box-shadow: none;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 14px;
+}
+
+.annale-row h3 {
+  font-size: 1.03rem;
+  line-height: 1.25;
+  margin: 8px 0 4px;
+}
+
+.annale-row p {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 750;
+  margin: 0;
+}
+
+.annale-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 150px 100px auto;
+}
+
+.annale-controls input {
+  min-height: 44px;
+}
+
 .mastery-card {
   box-shadow: none;
   padding: 16px;
@@ -1048,6 +1115,13 @@ textarea:focus {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .annales-dashboard,
+  .annales-filters,
+  .annale-row,
+  .annale-controls {
     grid-template-columns: 1fr;
   }
 

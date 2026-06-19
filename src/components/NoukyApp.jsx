@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ANNALE_CATALOG, ANNALE_TYPE_OPTIONS, ANNALE_YEAR_OPTIONS } from "@/lib/annales";
 import { getProgramsByExamType } from "@/lib/internat-program";
 
 const DIFFICULTIES = ["facile", "intermédiaire", "difficile"];
@@ -18,10 +19,17 @@ const MASTERY_LABELS = {
 const TABS = [
   { id: "cases", label: "Dossiers" },
   { id: "qcm", label: "QCM" },
+  { id: "annales", label: "Annales" },
   { id: "leitner", label: "Révisions Leitner" },
   { id: "progress", label: "Progression" },
   { id: "mock", label: "Concours blanc" },
 ];
+
+const ANNALE_STATUS_LABELS = {
+  todo: "À faire",
+  doing: "En cours",
+  done: "Terminé",
+};
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
@@ -86,6 +94,9 @@ export default function NoukyApp({ user }) {
   const [progress, setProgress] = useState(null);
   const [mockCases, setMockCases] = useState([]);
   const [mockCount, setMockCount] = useState(3);
+  const [annaleProgress, setAnnaleProgress] = useState({});
+  const [annaleTypeFilter, setAnnaleTypeFilter] = useState("all");
+  const [annaleYearFilter, setAnnaleYearFilter] = useState("all");
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
@@ -119,6 +130,15 @@ export default function NoukyApp({ user }) {
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("nouky_annale_progress");
+      if (saved) setAnnaleProgress(JSON.parse(saved));
+    } catch {
+      setAnnaleProgress({});
+    }
   }, []);
 
   useEffect(() => {
@@ -332,6 +352,21 @@ export default function NoukyApp({ user }) {
     setActiveTab("cases");
   }
 
+  function updateAnnaleProgress(annaleId, patch) {
+    setAnnaleProgress((current) => {
+      const next = {
+        ...current,
+        [annaleId]: {
+          ...(current[annaleId] || {}),
+          ...patch,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      window.localStorage.setItem("nouky_annale_progress", JSON.stringify(next));
+      return next;
+    });
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -428,6 +463,17 @@ export default function NoukyApp({ user }) {
           setShowBack={setShowBack}
           showBack={showBack}
           reload={loadDueCards}
+        />
+      ) : null}
+
+      {activeTab === "annales" ? (
+        <AnnalesTab
+          progress={annaleProgress}
+          setTypeFilter={setAnnaleTypeFilter}
+          setYearFilter={setAnnaleYearFilter}
+          typeFilter={annaleTypeFilter}
+          updateProgress={updateAnnaleProgress}
+          yearFilter={annaleYearFilter}
         />
       ) : null}
 
@@ -825,6 +871,142 @@ function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCard
       )}
     </section>
   );
+}
+
+function AnnalesTab({ progress, setTypeFilter, setYearFilter, typeFilter, updateProgress, yearFilter }) {
+  const filteredAnnales = ANNALE_CATALOG.filter((annale) => {
+    const matchesType = typeFilter === "all" || annale.type === typeFilter;
+    const matchesYear = yearFilter === "all" || String(annale.year) === yearFilter;
+    return matchesType && matchesYear;
+  });
+  const stats = getAnnaleStats(progress);
+
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>Annales</h2>
+          <p>Sujets MedShake depuis 1991, avec suivi personnel de réalisation.</p>
+        </div>
+        <a
+          className="secondary-button"
+          href="https://www.medshake.net/pharmacie/concours-internat/annales/"
+          rel="noreferrer"
+          target="_blank"
+        >
+          Source MedShake
+        </a>
+      </div>
+
+      <div className="annales-dashboard">
+        <Metric label="Annales terminées" value={`${stats.done}/${stats.total}`} />
+        <Metric label="En cours" value={stats.doing} />
+        <Metric label="Score moyen" value={stats.averageScore ? `${stats.averageScore}%` : "0%"} />
+        <Metric label="QCM terminés" value={stats.byType.qcm} />
+        <Metric label="Dossiers terminés" value={stats.byType.dossiers} />
+        <Metric label="Exercices terminés" value={stats.byType.exercices} />
+      </div>
+
+      <div className="annales-filters">
+        <label>
+          Type
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            <option value="all">Tous</option>
+            {ANNALE_TYPE_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Année
+          <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
+            <option value="all">Toutes</option>
+            {ANNALE_YEAR_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="annales-list">
+        {filteredAnnales.map((annale) => {
+          const itemProgress = progress[annale.id] || {};
+          const status = itemProgress.status || "todo";
+          return (
+            <article className="panel annale-row" key={annale.id}>
+              <div>
+                <span className={`mode-pill ${annale.type}`}>{annale.typeLabel}</span>
+                <h3>{annale.label}</h3>
+                <p>{annale.format} · {annale.year}</p>
+              </div>
+              <div className="annale-controls">
+                <label>
+                  Statut
+                  <select
+                    value={status}
+                    onChange={(event) => updateProgress(annale.id, { status: event.target.value })}
+                  >
+                    {Object.entries(ANNALE_STATUS_LABELS).map(([id, label]) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Score %
+                  <input
+                    max="100"
+                    min="0"
+                    onChange={(event) => updateProgress(annale.id, { score: normalizePercent(event.target.value) })}
+                    placeholder="0"
+                    type="number"
+                    value={itemProgress.score ?? ""}
+                  />
+                </label>
+                <a className="primary-button" href={annale.url} rel="noreferrer" target="_blank">
+                  Ouvrir
+                </a>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function getAnnaleStats(progress) {
+  const initial = {
+    total: ANNALE_CATALOG.length,
+    done: 0,
+    doing: 0,
+    scores: [],
+    byType: { qcm: 0, dossiers: 0, exercices: 0 },
+  };
+
+  const stats = ANNALE_CATALOG.reduce((acc, annale) => {
+    const item = progress[annale.id];
+    if (!item) return acc;
+    if (item.status === "done") {
+      acc.done += 1;
+      acc.byType[annale.type] += 1;
+    }
+    if (item.status === "doing") acc.doing += 1;
+    if (item.score !== undefined && item.score !== "") acc.scores.push(Number(item.score));
+    return acc;
+  }, initial);
+
+  const averageScore = stats.scores.length
+    ? Math.round(stats.scores.reduce((sum, score) => sum + score, 0) / stats.scores.length)
+    : 0;
+
+  return { ...stats, averageScore };
+}
+
+function normalizePercent(value) {
+  if (value === "") return "";
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return "";
+  return Math.min(Math.max(number, 0), 100);
 }
 
 function ProgressTab({ loading, progress, reload }) {
