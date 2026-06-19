@@ -81,6 +81,10 @@ export const ANNALE_YEAR_OPTIONS = [...new Set(SESSIONS.map((session) => session
   .sort((a, b) => b - a)
   .map((year) => ({ id: String(year), label: String(year) }));
 
+export function getAnnaleById(annaleId) {
+  return ANNALE_CATALOG.find((annale) => annale.id === annaleId) || null;
+}
+
 export function getRecentAnnales(limit = 60) {
   return ANNALE_CATALOG.slice(0, limit);
 }

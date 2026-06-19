@@ -78,7 +78,7 @@ function buildSpeedStats(answers) {
       const correction = parseCorrection(answer.correctionJson);
       const durationSeconds = normalizeDurationSeconds(correction.durationSeconds);
       if (!durationSeconds) return null;
-      const mode = answer.caseSession.mode === "qcm" ? "qcm" : "dossier";
+      const mode = speedModeFromSession(answer.caseSession.mode);
       return {
         id: answer.id,
         mode,
@@ -92,7 +92,8 @@ function buildSpeedStats(answers) {
 
   return {
     qcm: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "qcm")),
-    dossier: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "dossier")),
+    dossier: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "dossier" || answer.mode === "dossiers")),
+    exercices: summarizeSpeed(timedAnswers.filter((answer) => answer.mode === "exercices")),
     recent: timedAnswers.slice(0, 12).map((answer) => ({
       mode: answer.mode,
       subject: answer.subject,
@@ -101,6 +102,13 @@ function buildSpeedStats(answers) {
       createdAt: answer.createdAt,
     })),
   };
+}
+
+function speedModeFromSession(mode) {
+  if (mode === "qcm" || mode === "annale-qcm") return "qcm";
+  if (mode === "annale-exercices") return "exercices";
+  if (mode === "annale-dossiers") return "dossiers";
+  return "dossier";
 }
 
 function summarizeSpeed(items) {

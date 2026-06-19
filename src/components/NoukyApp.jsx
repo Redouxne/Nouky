@@ -97,12 +97,21 @@ export default function NoukyApp({ user }) {
   const [annaleProgress, setAnnaleProgress] = useState({});
   const [annaleTypeFilter, setAnnaleTypeFilter] = useState("all");
   const [annaleYearFilter, setAnnaleYearFilter] = useState("all");
+  const [activeAnnale, setActiveAnnale] = useState(null);
+  const [annaleSession, setAnnaleSession] = useState(null);
+  const [currentAnnaleIndex, setCurrentAnnaleIndex] = useState(0);
+  const [annaleAnswerDraft, setAnnaleAnswerDraft] = useState("");
+  const [annaleSelections, setAnnaleSelections] = useState({});
+  const [annaleCorrections, setAnnaleCorrections] = useState({});
+  const [annaleStartedAtMs, setAnnaleStartedAtMs] = useState(null);
+  const [annaleQuestionStartedAtMs, setAnnaleQuestionStartedAtMs] = useState(null);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
 
   const currentQuestion = caseSession?.questions?.[currentQuestionIndex];
   const currentQcmQuestion = qcmSession?.questions?.[currentQcmIndex];
+  const currentAnnaleQuestion = annaleSession?.questions?.[currentAnnaleIndex];
   const totalScore = useMemo(() => {
     return Object.values(corrections).reduce(
       (acc, correction) => ({
@@ -121,6 +130,15 @@ export default function NoukyApp({ user }) {
       { score: 0, maxScore: 0 },
     );
   }, [qcmCorrections]);
+  const annaleTotalScore = useMemo(() => {
+    return Object.values(annaleCorrections).reduce(
+      (acc, correction) => ({
+        score: acc.score + Number(correction.score || 0),
+        maxScore: acc.maxScore + Number(correction.maxScore || 0),
+      }),
+      { score: 0, maxScore: 0 },
+    );
+  }, [annaleCorrections]);
 
   useEffect(() => {
     if (activeTab === "leitner") loadDueCards();
@@ -152,6 +170,12 @@ export default function NoukyApp({ user }) {
       setQcmQuestionStartedAtMs(Date.now());
     }
   }, [qcmSession?.id, currentQcmQuestion?.id]);
+
+  useEffect(() => {
+    if (annaleSession && currentAnnaleQuestion && !annaleCorrections[currentAnnaleQuestion.id]) {
+      setAnnaleQuestionStartedAtMs(Date.now());
+    }
+  }, [annaleSession?.id, currentAnnaleQuestion?.id]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -367,6 +391,95 @@ export default function NoukyApp({ user }) {
     });
   }
 
+  async function loadAnnale(annale) {
+    setLoading("annale-load");
+    setError("");
+    try {
+      const data = await fetchJson("/api/annales/load", {
+        method: "POST",
+        body: JSON.stringify({ annaleId: annale.id }),
+      });
+      setActiveAnnale(data.annale);
+      setAnnaleSession(data.annaleSession);
+      setCurrentAnnaleIndex(0);
+      setAnnaleAnswerDraft("");
+      setAnnaleSelections({});
+      setAnnaleCorrections({});
+      const startedAt = Date.now();
+      setAnnaleStartedAtMs(startedAt);
+      setAnnaleQuestionStartedAtMs(startedAt);
+      updateAnnaleProgress(annale.id, { status: "doing" });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function closeAnnaleSession() {
+    setActiveAnnale(null);
+    setAnnaleSession(null);
+    setAnnaleAnswerDraft("");
+    setAnnaleSelections({});
+    setAnnaleCorrections({});
+    setCurrentAnnaleIndex(0);
+  }
+
+  function toggleAnnaleOption(questionId, optionId) {
+    setAnnaleSelections((current) => {
+      const existing = current[questionId] || [];
+      const next = existing.includes(optionId)
+        ? existing.filter((item) => item !== optionId)
+        : [...existing, optionId].sort();
+      return { ...current, [questionId]: next };
+    });
+  }
+
+  async function submitAnnaleAnswer(event) {
+    event.preventDefault();
+    if (!annaleSession || !currentAnnaleQuestion) return;
+
+    const isQcm = currentAnnaleQuestion.options?.length > 0;
+    const selectedOptionIds = annaleSelections[currentAnnaleQuestion.id] || [];
+    if (isQcm && !selectedOptionIds.length) return;
+    if (!isQcm && !annaleAnswerDraft.trim()) return;
+
+    setLoading("annale-answer");
+    setError("");
+    try {
+      const durationSeconds = elapsedSeconds(annaleQuestionStartedAtMs);
+      const data = await fetchJson("/api/annales/answer", {
+        method: "POST",
+        body: JSON.stringify({
+          caseSessionId: annaleSession.id,
+          questionId: currentAnnaleQuestion.id,
+          answer: annaleAnswerDraft,
+          selectedOptionIds,
+          durationSeconds,
+        }),
+      });
+      const nextCorrections = {
+        ...annaleCorrections,
+        [currentAnnaleQuestion.id]: data.correction,
+      };
+      setAnnaleCorrections(nextCorrections);
+      setAnnaleAnswerDraft("");
+      if (activeAnnale && Object.keys(nextCorrections).length === annaleSession.questions.length) {
+        const totalScore = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.score || 0), 0);
+        const totalMax = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.maxScore || 0), 0);
+        updateAnnaleProgress(activeAnnale.id, {
+          status: "done",
+          score: totalMax ? Math.round((totalScore / totalMax) * 100) : "",
+        });
+      }
+      setProgress(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -468,9 +581,27 @@ export default function NoukyApp({ user }) {
 
       {activeTab === "annales" ? (
         <AnnalesTab
+          activeAnnale={activeAnnale}
+          annaleAnswerDraft={annaleAnswerDraft}
+          annaleCorrections={annaleCorrections}
+          annaleQuestionStartedAtMs={annaleQuestionStartedAtMs}
+          annaleSelections={annaleSelections}
+          annaleSession={annaleSession}
+          annaleStartedAtMs={annaleStartedAtMs}
+          closeAnnaleSession={closeAnnaleSession}
+          currentQuestion={currentAnnaleQuestion}
+          currentQuestionIndex={currentAnnaleIndex}
+          loadAnnale={loadAnnale}
+          loading={loading}
+          nowMs={nowMs}
           progress={annaleProgress}
+          setAnnaleAnswerDraft={setAnnaleAnswerDraft}
+          setCurrentQuestionIndex={setCurrentAnnaleIndex}
           setTypeFilter={setAnnaleTypeFilter}
           setYearFilter={setAnnaleYearFilter}
+          submitAnswer={submitAnnaleAnswer}
+          toggleOption={toggleAnnaleOption}
+          totalScore={annaleTotalScore}
           typeFilter={annaleTypeFilter}
           updateProgress={updateAnnaleProgress}
           yearFilter={annaleYearFilter}
@@ -873,13 +1004,63 @@ function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCard
   );
 }
 
-function AnnalesTab({ progress, setTypeFilter, setYearFilter, typeFilter, updateProgress, yearFilter }) {
+function AnnalesTab(props) {
+  const {
+    activeAnnale,
+    annaleAnswerDraft,
+    annaleCorrections,
+    annaleQuestionStartedAtMs,
+    annaleSelections,
+    annaleSession,
+    annaleStartedAtMs,
+    closeAnnaleSession,
+    currentQuestion,
+    currentQuestionIndex,
+    loadAnnale,
+    loading,
+    nowMs,
+    progress,
+    setAnnaleAnswerDraft,
+    setCurrentQuestionIndex,
+    setTypeFilter,
+    setYearFilter,
+    submitAnswer,
+    toggleOption,
+    totalScore,
+    typeFilter,
+    updateProgress,
+    yearFilter,
+  } = props;
   const filteredAnnales = ANNALE_CATALOG.filter((annale) => {
     const matchesType = typeFilter === "all" || annale.type === typeFilter;
     const matchesYear = yearFilter === "all" || String(annale.year) === yearFilter;
     return matchesType && matchesYear;
   });
   const stats = getAnnaleStats(progress);
+
+  if (annaleSession && activeAnnale) {
+    return (
+      <AnnaleRunner
+        activeAnnale={activeAnnale}
+        answerDraft={annaleAnswerDraft}
+        closeSession={closeAnnaleSession}
+        corrections={annaleCorrections}
+        currentQuestion={currentQuestion}
+        currentQuestionIndex={currentQuestionIndex}
+        loading={loading}
+        nowMs={nowMs}
+        questionStartedAtMs={annaleQuestionStartedAtMs}
+        selections={annaleSelections}
+        session={annaleSession}
+        sessionStartedAtMs={annaleStartedAtMs}
+        setAnswerDraft={setAnnaleAnswerDraft}
+        setCurrentQuestionIndex={setCurrentQuestionIndex}
+        submitAnswer={submitAnswer}
+        toggleOption={toggleOption}
+        totalScore={totalScore}
+      />
+    );
+  }
 
   return (
     <section className="tab-panel">
@@ -962,13 +1143,163 @@ function AnnalesTab({ progress, setTypeFilter, setYearFilter, typeFilter, update
                     value={itemProgress.score ?? ""}
                   />
                 </label>
-                <a className="primary-button" href={annale.url} rel="noreferrer" target="_blank">
-                  Ouvrir
+                <button
+                  className="primary-button"
+                  disabled={loading === "annale-load"}
+                  onClick={() => loadAnnale(annale)}
+                  type="button"
+                >
+                  {loading === "annale-load" ? "Chargement..." : "Démarrer"}
+                </button>
+                <a className="secondary-button" href={annale.url} rel="noreferrer" target="_blank">
+                  Source
                 </a>
               </div>
             </article>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function AnnaleRunner(props) {
+  const {
+    activeAnnale,
+    answerDraft,
+    closeSession,
+    corrections,
+    currentQuestion,
+    currentQuestionIndex,
+    loading,
+    nowMs,
+    questionStartedAtMs,
+    selections,
+    session,
+    sessionStartedAtMs,
+    setAnswerDraft,
+    setCurrentQuestionIndex,
+    submitAnswer,
+    toggleOption,
+    totalScore,
+  } = props;
+  const currentCorrection = currentQuestion ? corrections[currentQuestion.id] : null;
+  const selected = currentQuestion ? selections[currentQuestion.id] || [] : [];
+  const isQcm = currentQuestion?.options?.length > 0;
+  const questionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
+  const totalQuestions = session.questions.length;
+  const nextQuestionIndex = session.questions.findIndex((question, index) => index > currentQuestionIndex && !corrections[question.id]);
+  const fallbackNextIndex = currentQuestionIndex + 1 < totalQuestions ? currentQuestionIndex + 1 : -1;
+  const canGoNext = nextQuestionIndex !== -1 || fallbackNextIndex !== -1;
+
+  function goToNextQuestion() {
+    const targetIndex = nextQuestionIndex !== -1 ? nextQuestionIndex : fallbackNextIndex;
+    if (targetIndex !== -1) setCurrentQuestionIndex(targetIndex);
+  }
+
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>{activeAnnale.label}</h2>
+          <p>{activeAnnale.typeLabel} · {activeAnnale.sessionLabel}</p>
+        </div>
+        <button className="secondary-button" onClick={closeSession} type="button">Retour aux annales</button>
+      </div>
+
+      <div className="case-layout">
+        <article className="panel case-document">
+          <div className="panel-header">
+            <div>
+              <div className="eyebrow">{session.subject}</div>
+              <h2>{session.title}</h2>
+            </div>
+            <div className="header-metrics">
+              <TimerPill label="Session" seconds={elapsedSeconds(sessionStartedAtMs, nowMs)} />
+              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+            </div>
+          </div>
+          <div className="document-body annale-statement">
+            <h3>Énoncé</h3>
+            <p>{session.statement}</p>
+          </div>
+          <div className="qcm-question-list">
+            {session.questions.map((question, index) => (
+              <button
+                key={question.id}
+                className={`question-nav ${index === currentQuestionIndex ? "active" : ""} ${corrections[question.id] ? "done" : ""}`}
+                onClick={() => setCurrentQuestionIndex(index)}
+                type="button"
+              >
+                Q{index + 1} · {corrections[question.id] ? formatScore(corrections[question.id].score, corrections[question.id].maxScore) : `${question.maxScore} pt`}
+              </button>
+            ))}
+          </div>
+        </article>
+
+        <aside className="panel question-panel">
+          <div className="panel-header">
+            <h2>Question {currentQuestionIndex + 1}</h2>
+            <div className="header-metrics compact">
+              <TimerPill label="Question" seconds={questionDuration} />
+              <span className="counter">{currentQuestionIndex + 1}/{totalQuestions}</span>
+            </div>
+          </div>
+
+          {currentQuestion ? (
+            <form className={isQcm ? "qcm-form" : "answer-form"} onSubmit={submitAnswer}>
+              <p className="qcm-stem">{currentQuestion.text}</p>
+              {isQcm ? (
+                <div className="option-list">
+                  {currentQuestion.options.map((option) => (
+                    <label
+                      className={`option-row ${selected.includes(option.id) ? "selected" : ""}`}
+                      key={option.id}
+                    >
+                      <input
+                        checked={selected.includes(option.id)}
+                        disabled={Boolean(currentCorrection) || loading === "annale-answer"}
+                        onChange={() => toggleOption(currentQuestion.id, option.id)}
+                        type="checkbox"
+                      />
+                      <span className="option-letter">{option.id}</span>
+                      <span>{option.text}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <textarea
+                  disabled={Boolean(currentCorrection) || loading === "annale-answer"}
+                  onChange={(event) => setAnswerDraft(event.target.value)}
+                  placeholder="Réponse structurée..."
+                  value={answerDraft}
+                />
+              )}
+              <div className="qcm-actions">
+                <button
+                  className="primary-button"
+                  disabled={
+                    loading === "annale-answer" ||
+                    Boolean(currentCorrection) ||
+                    (isQcm ? !selected.length : !answerDraft.trim())
+                  }
+                >
+                  {currentCorrection ? "Corrigé" : loading === "annale-answer" ? "Correction..." : "Corriger"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!currentCorrection || !canGoNext}
+                  onClick={goToNextQuestion}
+                  type="button"
+                >
+                  Question suivante
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {currentCorrection ? <CorrectionBlock correction={currentCorrection} /> : null}
+        </aside>
       </div>
     </section>
   );
@@ -1045,8 +1376,10 @@ function ProgressTab({ loading, progress, reload }) {
             <Metric label="Cartes totales" value={progress.totalCards} />
             <Metric label="Temps moyen QCM" value={formatDuration(progress.speedStats?.qcm?.averageSeconds)} />
             <Metric label="Temps moyen dossier" value={formatDuration(progress.speedStats?.dossier?.averageSeconds)} />
+            <Metric label="Temps moyen exercice" value={formatDuration(progress.speedStats?.exercices?.averageSeconds)} />
             <Metric label="Tendance QCM" value={formatSpeedDelta(progress.speedStats?.qcm?.deltaSeconds)} />
             <Metric label="Tendance dossier" value={formatSpeedDelta(progress.speedStats?.dossier?.deltaSeconds)} />
+            <Metric label="Tendance exercice" value={formatSpeedDelta(progress.speedStats?.exercices?.deltaSeconds)} />
           </div>
           <SpeedProgressPanel speedStats={progress.speedStats} />
           {selectedMastery && selectedSubject ? (
@@ -1139,7 +1472,7 @@ function SpeedProgressPanel({ speedStats }) {
         <div className="speed-list">
           {recent.map((item, index) => (
             <div className="speed-row" key={`${item.createdAt}-${index}`}>
-              <span className={`mode-pill ${item.mode}`}>{item.mode === "qcm" ? "QCM" : "Dossier"}</span>
+              <span className={`mode-pill ${item.mode}`}>{speedModeLabel(item.mode)}</span>
               <span>{item.subject}</span>
               <strong>{formatDuration(item.durationSeconds)}</strong>
               <small>{item.scoreRate}%</small>
@@ -1151,6 +1484,12 @@ function SpeedProgressPanel({ speedStats }) {
       )}
     </div>
   );
+}
+
+function speedModeLabel(mode) {
+  if (mode === "qcm") return "QCM";
+  if (mode === "exercices") return "Exercice";
+  return "Dossier";
 }
 
 function MasteryItemsPanel({ items, onClose, panelRef, status, subject }) {
