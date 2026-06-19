@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request) {
   const session = await getSession();

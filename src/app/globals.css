@@ -828,11 +828,40 @@ textarea:focus {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: 150px 100px auto auto;
+  grid-template-columns: 130px 110px auto auto;
 }
 
-.annale-controls input {
+.annale-readout {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
   min-height: 44px;
+  padding: 7px 10px;
+}
+
+.annale-readout span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.annale-readout strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.1;
+}
+
+.annale-loading {
+  color: var(--primary-strong) !important;
+  font-weight: 850 !important;
+  margin-top: 8px !important;
+}
+
+.annale-error {
+  margin-bottom: 14px;
+  margin-top: 0;
 }
 
 .annale-statement {

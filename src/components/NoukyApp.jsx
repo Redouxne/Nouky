@@ -105,6 +105,7 @@ export default function NoukyApp({ user }) {
   const [annaleCorrections, setAnnaleCorrections] = useState({});
   const [annaleStartedAtMs, setAnnaleStartedAtMs] = useState(null);
   const [annaleQuestionStartedAtMs, setAnnaleQuestionStartedAtMs] = useState(null);
+  const [loadingAnnaleId, setLoadingAnnaleId] = useState(null);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(Date.now());
@@ -393,6 +394,7 @@ export default function NoukyApp({ user }) {
 
   async function loadAnnale(annale) {
     setLoading("annale-load");
+    setLoadingAnnaleId(annale.id);
     setError("");
     try {
       const data = await fetchJson("/api/annales/load", {
@@ -410,9 +412,10 @@ export default function NoukyApp({ user }) {
       setAnnaleQuestionStartedAtMs(startedAt);
       updateAnnaleProgress(annale.id, { status: "doing" });
     } catch (err) {
-      setError(err.message);
+      setError(`Impossible de démarrer ${annale.label} : ${err.message}`);
     } finally {
       setLoading("");
+      setLoadingAnnaleId(null);
     }
   }
 
@@ -470,6 +473,7 @@ export default function NoukyApp({ user }) {
         updateAnnaleProgress(activeAnnale.id, {
           status: "done",
           score: totalMax ? Math.round((totalScore / totalMax) * 100) : "",
+          scoreSource: "agent",
         });
       }
       setProgress(null);
@@ -591,8 +595,10 @@ export default function NoukyApp({ user }) {
           closeAnnaleSession={closeAnnaleSession}
           currentQuestion={currentAnnaleQuestion}
           currentQuestionIndex={currentAnnaleIndex}
+          error={error}
           loadAnnale={loadAnnale}
           loading={loading}
+          loadingAnnaleId={loadingAnnaleId}
           nowMs={nowMs}
           progress={annaleProgress}
           setAnnaleAnswerDraft={setAnnaleAnswerDraft}
@@ -603,7 +609,6 @@ export default function NoukyApp({ user }) {
           toggleOption={toggleAnnaleOption}
           totalScore={annaleTotalScore}
           typeFilter={annaleTypeFilter}
-          updateProgress={updateAnnaleProgress}
           yearFilter={annaleYearFilter}
         />
       ) : null}
@@ -1016,8 +1021,10 @@ function AnnalesTab(props) {
     closeAnnaleSession,
     currentQuestion,
     currentQuestionIndex,
+    error,
     loadAnnale,
     loading,
+    loadingAnnaleId,
     nowMs,
     progress,
     setAnnaleAnswerDraft,
@@ -1028,7 +1035,6 @@ function AnnalesTab(props) {
     toggleOption,
     totalScore,
     typeFilter,
-    updateProgress,
     yearFilter,
   } = props;
   const filteredAnnales = ANNALE_CATALOG.filter((annale) => {
@@ -1109,47 +1115,40 @@ function AnnalesTab(props) {
         </label>
       </div>
 
+      {error ? <div className="error annale-error">{error}</div> : null}
+
       <div className="annales-list">
         {filteredAnnales.map((annale) => {
           const itemProgress = progress[annale.id] || {};
           const status = itemProgress.status || "todo";
+          const score = itemProgress.scoreSource === "agent" ? itemProgress.score : "";
+          const isLoadingThisAnnale = loading === "annale-load" && loadingAnnaleId === annale.id;
           return (
             <article className="panel annale-row" key={annale.id}>
               <div>
                 <span className={`mode-pill ${annale.type}`}>{annale.typeLabel}</span>
                 <h3>{annale.label}</h3>
                 <p>{annale.format} · {annale.year}</p>
+                {isLoadingThisAnnale ? (
+                  <p className="annale-loading">Préparation du sujet et de la grille de correction...</p>
+                ) : null}
               </div>
               <div className="annale-controls">
-                <label>
-                  Statut
-                  <select
-                    value={status}
-                    onChange={(event) => updateProgress(annale.id, { status: event.target.value })}
-                  >
-                    {Object.entries(ANNALE_STATUS_LABELS).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Score %
-                  <input
-                    max="100"
-                    min="0"
-                    onChange={(event) => updateProgress(annale.id, { score: normalizePercent(event.target.value) })}
-                    placeholder="0"
-                    type="number"
-                    value={itemProgress.score ?? ""}
-                  />
-                </label>
+                <div className="annale-readout">
+                  <span>Statut</span>
+                  <strong>{ANNALE_STATUS_LABELS[status]}</strong>
+                </div>
+                <div className="annale-readout">
+                  <span>Score agent</span>
+                  <strong>{score !== "" && score !== undefined ? `${score}%` : "-"}</strong>
+                </div>
                 <button
                   className="primary-button"
                   disabled={loading === "annale-load"}
                   onClick={() => loadAnnale(annale)}
                   type="button"
                 >
-                  {loading === "annale-load" ? "Chargement..." : "Démarrer"}
+                  {isLoadingThisAnnale ? "Préparation..." : "Démarrer"}
                 </button>
                 <a className="secondary-button" href={annale.url} rel="noreferrer" target="_blank">
                   Source
@@ -1322,7 +1321,9 @@ function getAnnaleStats(progress) {
       acc.byType[annale.type] += 1;
     }
     if (item.status === "doing") acc.doing += 1;
-    if (item.score !== undefined && item.score !== "") acc.scores.push(Number(item.score));
+    if (item.scoreSource === "agent" && item.score !== undefined && item.score !== "") {
+      acc.scores.push(Number(item.score));
+    }
     return acc;
   }, initial);
 
@@ -1331,13 +1332,6 @@ function getAnnaleStats(progress) {
     : 0;
 
   return { ...stats, averageScore };
-}
-
-function normalizePercent(value) {
-  if (value === "") return "";
-  const number = Math.round(Number(value));
-  if (!Number.isFinite(number)) return "";
-  return Math.min(Math.max(number, 0), 100);
 }
 
 function ProgressTab({ loading, progress, reload }) {

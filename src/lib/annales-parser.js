@@ -176,15 +176,29 @@ function decodePdfLiteral(value) {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetchAnnaleResource(url);
   if (!response.ok) throw new Error(`Impossible de charger l'annale (${response.status})`);
   return response.text();
 }
 
 async function fetchArrayBuffer(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetchAnnaleResource(url);
   if (!response.ok) throw new Error(`Impossible de charger le PDF (${response.status})`);
   return response.arrayBuffer();
+}
+
+async function fetchAnnaleResource(url) {
+  try {
+    return await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Nouky/1.0",
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch {
+    throw new Error("MedShake est inaccessible depuis le serveur pour le moment. Réessaie dans quelques secondes.");
+  }
 }
 
 function htmlToText(html) {
