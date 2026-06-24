@@ -8,16 +8,13 @@ export async function GET() {
   const session = await getSession();
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
-  const [caseCount, answers, dueCards, totalCards, cards] = await Promise.all([
-    prisma.caseSession.count({ where: { userId: session.id } }),
+  const [answers, cards] = await Promise.all([
     prisma.answer.findMany({
       where: { userId: session.id },
       include: { caseSession: true },
       orderBy: { createdAt: "desc" },
       take: 200,
     }),
-    prisma.leitnerCard.count({ where: { userId: session.id, dueAt: { lte: new Date() } } }),
-    prisma.leitnerCard.count({ where: { userId: session.id } }),
     prisma.leitnerCard.findMany({ where: { userId: session.id } }),
   ]);
 
@@ -60,11 +57,8 @@ export async function GET() {
   const speedStats = buildSpeedStats(answers);
 
   return Response.json({
-    caseCount,
     answerCount: answers.length,
     averageScore,
-    dueCards,
-    totalCards,
     weakSubjects,
     weakSkills,
     masteryBySubject,

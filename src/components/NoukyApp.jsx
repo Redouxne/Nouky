@@ -17,11 +17,10 @@ const MASTERY_LABELS = {
   jamais_vu: "Jamais vu",
 };
 const TABS = [
-  { id: "cases", label: "Dossiers" },
-  { id: "qcm", label: "QCM" },
+  { id: "progress", label: "Dashboard" },
   { id: "annales", label: "Annales" },
-  { id: "leitner", label: "Révisions Leitner" },
-  { id: "progress", label: "Progression" },
+  { id: "qcm", label: "QCM" },
+  { id: "cases", label: "Dossiers" },
   { id: "mock", label: "Concours blanc" },
 ];
 
@@ -58,12 +57,6 @@ function formatDuration(totalSeconds) {
   return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
-function formatSpeedDelta(deltaSeconds) {
-  if (!deltaSeconds) return "stable";
-  const prefix = deltaSeconds > 0 ? "+" : "-";
-  return `${prefix}${formatDuration(Math.abs(deltaSeconds))}`;
-}
-
 function elapsedSeconds(startedAtMs, nowMs = Date.now()) {
   if (!startedAtMs) return 0;
   return Math.max(0, Math.round((nowMs - startedAtMs) / 1000));
@@ -71,7 +64,7 @@ function elapsedSeconds(startedAtMs, nowMs = Date.now()) {
 
 export default function NoukyApp({ user }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("cases");
+  const [activeTab, setActiveTab] = useState("progress");
   const [caseSubjectId, setCaseSubjectId] = useState(DEFAULT_CLINICAL_SUBJECT);
   const [qcmSubjectId, setQcmSubjectId] = useState(DEFAULT_QCM_SUBJECT);
   const [difficulty, setDifficulty] = useState("intermédiaire");
@@ -88,9 +81,6 @@ export default function NoukyApp({ user }) {
   const [qcmSelections, setQcmSelections] = useState({});
   const [qcmCorrections, setQcmCorrections] = useState({});
   const [qcmCount, setQcmCount] = useState(10);
-  const [leitnerCards, setLeitnerCards] = useState([]);
-  const [activeCardIndex, setActiveCardIndex] = useState(0);
-  const [showBack, setShowBack] = useState(false);
   const [progress, setProgress] = useState(null);
   const [mockCases, setMockCases] = useState([]);
   const [mockCount, setMockCount] = useState(3);
@@ -142,7 +132,6 @@ export default function NoukyApp({ user }) {
   }, [annaleCorrections]);
 
   useEffect(() => {
-    if (activeTab === "leitner") loadDueCards();
     if (activeTab === "progress") loadProgress();
   }, [activeTab]);
 
@@ -291,43 +280,6 @@ export default function NoukyApp({ user }) {
         ...current,
         [currentQcmQuestion.id]: data.correction,
       }));
-      setProgress(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading("");
-    }
-  }
-
-  async function loadDueCards() {
-    setLoading("leitner");
-    setError("");
-    try {
-      const data = await fetchJson("/api/leitner/due");
-      setLeitnerCards(data.cards || []);
-      setActiveCardIndex(0);
-      setShowBack(false);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading("");
-    }
-  }
-
-  async function reviewCard(rating) {
-    const card = leitnerCards[activeCardIndex];
-    if (!card) return;
-    setLoading("review");
-    setError("");
-    try {
-      await fetchJson("/api/leitner/review", {
-        method: "POST",
-        body: JSON.stringify({ cardId: card.id, rating }),
-      });
-      const nextCards = leitnerCards.filter((item) => item.id !== card.id);
-      setLeitnerCards(nextCards);
-      setActiveCardIndex(0);
-      setShowBack(false);
       setProgress(null);
     } catch (err) {
       setError(err.message);
@@ -490,8 +442,8 @@ export default function NoukyApp({ user }) {
         <div className="brand">
           <img className="brand-logo" src="/Leoard.png" alt="" />
           <div>
-            <div className="brand-name">Nouky</div>
-            <div className="brand-subtitle">Internat pharmacie</div>
+          <div className="brand-name">Nouky</div>
+          <div className="brand-subtitle">Internat pharmacie</div>
           </div>
         </div>
         <div className="userbar">
@@ -504,7 +456,7 @@ export default function NoukyApp({ user }) {
         <div>
           <div className="eyebrow">Préparation concours</div>
           <h1>Dossiers thérapeutiques et biologiques</h1>
-          <p>QCM, dossiers, Leitner et progression par item pour l'internat de pharmacie.</p>
+          <p>Dashboard, annales, QCM et dossiers pour l'internat de pharmacie.</p>
         </div>
       </section>
 
@@ -567,19 +519,6 @@ export default function NoukyApp({ user }) {
           submitAnswer={submitQcmAnswer}
           toggleOption={toggleQcmOption}
           totalScore={qcmTotalScore}
-        />
-      ) : null}
-
-      {activeTab === "leitner" ? (
-        <LeitnerTab
-          activeCardIndex={activeCardIndex}
-          cards={leitnerCards}
-          loading={loading}
-          reviewCard={reviewCard}
-          setActiveCardIndex={setActiveCardIndex}
-          setShowBack={setShowBack}
-          showBack={showBack}
-          reload={loadDueCards}
         />
       ) : null}
 
@@ -955,60 +894,6 @@ function TimerPill({ label, seconds }) {
   );
 }
 
-function LeitnerTab({ activeCardIndex, cards, loading, reviewCard, setActiveCardIndex, setShowBack, showBack, reload }) {
-  const card = cards[activeCardIndex];
-  return (
-    <section className="tab-panel">
-      <div className="section-header">
-        <div>
-          <h2>Révisions Leitner</h2>
-          <p>Cartes dues aujourd'hui, issues des items travaillés en QCM et dossiers.</p>
-        </div>
-        <button className="secondary-button" onClick={reload} disabled={loading === "leitner"}>Actualiser</button>
-      </div>
-
-      {!card ? (
-        <div className="empty-state">Aucune carte due pour le moment.</div>
-      ) : (
-        <div className="leitner-card panel">
-          <div className="eyebrow">{card.subject} · Box {card.box}</div>
-          <h3>{card.front}</h3>
-          {showBack ? <p className="card-back">{card.back}</p> : null}
-          <div className="button-row">
-            {!showBack ? (
-              <button className="primary-button" onClick={() => setShowBack(true)}>Afficher la réponse</button>
-            ) : (
-              <>
-                <button className="secondary-button" onClick={() => reviewCard("failure")}>Échec</button>
-                <button className="secondary-button" onClick={() => reviewCard("difficult")}>Difficile</button>
-                <button className="primary-button" onClick={() => reviewCard("correct")}>Correct</button>
-                <button className="primary-button" onClick={() => reviewCard("mastered")}>Maîtrisé</button>
-              </>
-            )}
-          </div>
-          {cards.length > 1 ? (
-            <div className="button-row">
-              {cards.map((item, index) => (
-                <button
-                  key={item.id}
-                  className={`dot-button ${index === activeCardIndex ? "active" : ""}`}
-                  onClick={() => {
-                    setActiveCardIndex(index);
-                    setShowBack(false);
-                  }}
-                  type="button"
-                >
-                  {index + 1}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function AnnalesTab(props) {
   const {
     activeAnnale,
@@ -1353,8 +1238,8 @@ function ProgressTab({ loading, progress, reload }) {
     <section className="tab-panel">
       <div className="section-header">
         <div>
-          <h2>Progression</h2>
-          <p>Suivi des scores, matières faibles et cartes dues.</p>
+          <h2>Dashboard</h2>
+          <p>Suivi des scores, matières faibles et progression par item.</p>
         </div>
         <button className="secondary-button" onClick={reload} disabled={loading === "progress"}>Actualiser</button>
       </div>
@@ -1364,18 +1249,11 @@ function ProgressTab({ loading, progress, reload }) {
         <>
           <div className="stats-grid">
             <Metric label="Score moyen" value={`${progress.averageScore}%`} />
-            <Metric label="Sessions créées" value={progress.caseCount} />
             <Metric label="Réponses corrigées" value={progress.answerCount} />
-            <Metric label="Cartes dues" value={progress.dueCards} />
-            <Metric label="Cartes totales" value={progress.totalCards} />
             <Metric label="Temps moyen QCM" value={formatDuration(progress.speedStats?.qcm?.averageSeconds)} />
             <Metric label="Temps moyen dossier" value={formatDuration(progress.speedStats?.dossier?.averageSeconds)} />
             <Metric label="Temps moyen exercice" value={formatDuration(progress.speedStats?.exercices?.averageSeconds)} />
-            <Metric label="Tendance QCM" value={formatSpeedDelta(progress.speedStats?.qcm?.deltaSeconds)} />
-            <Metric label="Tendance dossier" value={formatSpeedDelta(progress.speedStats?.dossier?.deltaSeconds)} />
-            <Metric label="Tendance exercice" value={formatSpeedDelta(progress.speedStats?.exercices?.deltaSeconds)} />
           </div>
-          <SpeedProgressPanel speedStats={progress.speedStats} />
           {selectedMastery && selectedSubject ? (
             <MasteryItemsPanel
               items={selectedItems}
@@ -1452,40 +1330,6 @@ function Metric({ label, value }) {
   );
 }
 
-function SpeedProgressPanel({ speedStats }) {
-  const recent = speedStats?.recent || [];
-  return (
-    <div className="panel speed-panel">
-      <div className="speed-panel-header">
-        <div>
-          <h3>Vitesse</h3>
-          <p>Temps par question sur les dernières réponses chronométrées.</p>
-        </div>
-      </div>
-      {recent.length ? (
-        <div className="speed-list">
-          {recent.map((item, index) => (
-            <div className="speed-row" key={`${item.createdAt}-${index}`}>
-              <span className={`mode-pill ${item.mode}`}>{speedModeLabel(item.mode)}</span>
-              <span>{item.subject}</span>
-              <strong>{formatDuration(item.durationSeconds)}</strong>
-              <small>{item.scoreRate}%</small>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="speed-empty">Aucune réponse chronométrée pour l'instant.</p>
-      )}
-    </div>
-  );
-}
-
-function speedModeLabel(mode) {
-  if (mode === "qcm") return "QCM";
-  if (mode === "exercices") return "Exercice";
-  return "Dossier";
-}
-
 function MasteryItemsPanel({ items, onClose, panelRef, status, subject }) {
   return (
     <section className="panel mastery-items-panel" ref={panelRef}>
@@ -1506,7 +1350,7 @@ function MasteryItemsPanel({ items, onClose, panelRef, status, subject }) {
               </div>
               <div className="mastery-item-meta">
                 <span>{item.attempts} passage(s)</span>
-                <span>{item.box ? `Box ${item.box}` : "Pas de box"}</span>
+                <span>{item.box ? `Niveau ${item.box}` : "Non revu"}</span>
               </div>
             </article>
           ))}

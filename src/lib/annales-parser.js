@@ -79,26 +79,43 @@ function parseAnswerGrid(text) {
 }
 
 async function parsePdfAnnale(annale) {
-  const pdfBuffer = Buffer.from(await fetchArrayBuffer(annale.url));
-  const text = extractPdfText(pdfBuffer);
-  const questions = parseStructuredPdfQuestions(text, annale);
-  if (!questions.length) throw new Error("Impossible de parser les questions du PDF");
+  let text = "";
+  let extractionSource = "pdf";
+
+  try {
+    const pdfBuffer = Buffer.from(await fetchArrayBuffer(annale.url));
+    text = extractPdfText(pdfBuffer);
+  } catch {
+    text = "";
+  }
+
+  let questions = parseStructuredPdfQuestions(text, annale);
+  if (!questions.length) {
+    extractionSource = "ocr";
+    text = await fetchMistralOcrText(annale.url);
+    questions = parseStructuredPdfQuestions(text, annale);
+  }
+
+  if (!questions.length) {
+    throw new Error("Impossible de parser les questions du PDF, même après OCR Mistral");
+  }
+  const normalizedText = normalizeAnnalePdfText(text);
 
   return {
     title: annale.label,
     subject: `Annales - ${annale.typeLabel}`,
     difficulty: "annale",
     hiddenDiagnosis: "",
-    statement: buildPdfStatement(text, annale),
+    statement: buildPdfStatement(normalizedText, annale, extractionSource),
     biologicalData: [],
     questions,
   };
 }
 
 function parseStructuredPdfQuestions(text, annale) {
-  const normalized = cleanText(text).replace(/\s*QUESTION\s+N[°º]\s*/gi, "\nQUESTION N° ");
+  const normalized = normalizeAnnalePdfText(text);
   const questionRegex =
-    /QUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)(?:Proposition\s+de\s+réponse\s*([\s\S]*?))(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\nDossier\s+N[°º]\s*\d+|\nExercice\s+N[°º]\s*\d+|$)/gi;
+    /QUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)\nPROPOSITION\s+DE\s+RÉPONSE\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\nDOSSIER\s+N[°º]\s*\d+|\nEXERCICE\s+N[°º]\s*\d+|$)/gi;
   const questions = [];
   let match;
   while ((match = questionRegex.exec(normalized))) {
@@ -121,10 +138,22 @@ function parseStructuredPdfQuestions(text, annale) {
   return questions;
 }
 
-function buildPdfStatement(text, annale) {
+function normalizeAnnalePdfText(text) {
+  return cleanText(text)
+    .replace(/\r/g, "\n")
+    .replace(/\s*(Dossier)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nDOSSIER N° $2")
+    .replace(/\s*(Exercice)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nEXERCICE N° $2")
+    .replace(/\s*(Question)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nQUESTION N° $2")
+    .replace(/\s*(?:Proposition\s+de\s+r[ée]ponse[s]?|Corrig[ée]|Correction)\s*:?\s*/gi, "\nPROPOSITION DE RÉPONSE\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildPdfStatement(text, annale, extractionSource) {
   const firstQuestion = text.search(/QUESTION\s+N[°º]\s*\d+/i);
   const statement = firstQuestion > 0 ? text.slice(0, firstQuestion) : text.slice(0, 2500);
-  return cleanText(`${annale.label}\n\n${statement}`).slice(0, 5000);
+  const sourceLabel = extractionSource === "ocr" ? "Extraction OCR Mistral" : "Extraction PDF";
+  return cleanText(`${annale.label}\n${sourceLabel}\n\n${statement}`).slice(0, 5000);
 }
 
 function extractPdfText(buffer) {
@@ -187,6 +216,53 @@ async function fetchArrayBuffer(url) {
   return response.arrayBuffer();
 }
 
+async function fetchMistralOcrText(url) {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    throw new Error("OCR Mistral indisponible : MISTRAL_API_KEY manquante");
+  }
+
+  let response;
+  try {
+    response = await fetch("https://api.mistral.ai/v1/ocr", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "mistral-ocr-latest",
+        document: {
+          type: "document_url",
+          document_url: url,
+        },
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(45000),
+    });
+  } catch {
+    throw new Error("OCR Mistral inaccessible depuis le serveur pour le moment");
+  }
+
+  if (!response.ok) {
+    const details = await response.text();
+    let providerMessage = details;
+    try {
+      providerMessage = JSON.parse(details)?.message || details;
+    } catch {
+      providerMessage = details;
+    }
+    throw new Error(`OCR Mistral ${response.status}: ${providerMessage}`);
+  }
+
+  const payload = await response.json();
+  const pages = safeArray(payload?.pages)
+    .map((page) => String(page?.markdown || ""))
+    .filter(Boolean);
+  if (!pages.length) throw new Error("OCR Mistral n'a retourné aucun texte exploitable");
+  return pages.join("\n\n");
+}
+
 async function fetchAnnaleResource(url) {
   try {
     return await fetch(url, {
@@ -194,7 +270,7 @@ async function fetchAnnaleResource(url) {
       headers: {
         "User-Agent": "Nouky/1.0",
       },
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(12000),
     });
   } catch {
     throw new Error("MedShake est inaccessible depuis le serveur pour le moment. Réessaie dans quelques secondes.");
