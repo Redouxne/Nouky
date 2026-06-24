@@ -81,6 +81,7 @@ export function publicCasePayload(caseSession) {
       sectionId: question.sectionId || "",
       sectionTitle: question.sectionTitle || "",
       sectionStatement: question.sectionStatement || "",
+      correctionSource: question.correctionSource || "",
       options: safeArray(question.options).map((option) => ({
         id: String(option.id),
         text: String(option.text),

@@ -123,6 +123,20 @@ Exigences :
 
 export function correctionMessages({ statement, biologicalData, question, userAnswer }) {
   const maxScore = question.grading.reduce((sum, item) => sum + Number(item.points || 0), 0);
+  const isOfficialAnnaleCorrection = question.correctionSource === "official_proposed_answer";
+  const referenceLabel = isOfficialAnnaleCorrection
+    ? "Correction proposée officielle de l'annale"
+    : "Correction proposée officielle de l'annale";
+  const referenceInstruction = isOfficialAnnaleCorrection
+    ? `Étape obligatoire : vérifie d'abord que la correction proposée officielle de cette question est bien fournie ci-dessous.
+Elle est fournie : tu dois corriger exclusivement en comparant la réponse utilisateur à cette correction proposée officielle.
+Ne rajoute pas d'exigence qui n'est pas présente dans cette correction proposée, sauf erreur dangereuse manifeste.
+Si la réponse utilisateur contient une formulation différente mais équivalente à la correction proposée, accorde les points correspondants.
+La correction type que tu rends doit reformuler cette correction proposée, pas inventer un autre corrigé.`
+    : `Étape obligatoire : vérifie d'abord si une correction proposée officielle de cette question est fournie ci-dessous.
+Elle n'est pas fournie ou elle est inexploitable : corrige alors d'après tes connaissances, mais uniquement si tu es très sûr de toi.
+Si plusieurs interprétations sont possibles, adopte une notation prudente, explicite les hypothèses dans "feedback", et ne présente pas une invention comme une correction officielle.
+La correction type doit indiquer qu'elle est construite faute de proposition officielle détectée.`;
   return [
     {
       role: "system",
@@ -130,6 +144,8 @@ export function correctionMessages({ statement, biologicalData, question, userAn
 
 Tu sanctions les réponses vagues, les diagnostics non justifiés, l'absence de valeurs biologiques, mécanismes pharmacologiques,
 durées, surveillance et erreurs dangereuses.
+
+${referenceInstruction}
 
 Tu ne félicites pas. Tu formules une correction sobre, universitaire et utile.
 Retour uniquement en JSON valide, sans markdown.`,
@@ -145,8 +161,8 @@ ${JSON.stringify(biologicalData)}
 Question :
 ${question.text}
 
-Réponse attendue :
-${question.expectedAnswer}
+${referenceLabel} :
+${question.expectedAnswer || "Aucune proposition de réponse officielle exploitable détectée pour cette question."}
 
 Mots-clés attendus :
 ${JSON.stringify(question.keywords)}

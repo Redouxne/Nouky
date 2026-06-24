@@ -895,41 +895,113 @@ function TimerPill({ label, seconds }) {
 }
 
 function MarkdownLite({ content }) {
+  const [zoomedImage, setZoomedImage] = useState(null);
   const blocks = markdownBlocks(content);
   return (
-    <div className="markdown-lite">
-      {blocks.map((block, index) => {
-        if (block.type === "heading") return <h4 key={index}>{block.text}</h4>;
-        if (block.type === "image") {
-          return (
-            <figure className="ocr-figure" key={index}>
-              <img alt={block.alt || "Figure du sujet"} src={block.src} />
-              {block.alt ? <figcaption>{block.alt}</figcaption> : null}
-            </figure>
-          );
-        }
-        if (block.type === "table") {
-          return (
-            <div className="ocr-table-wrap" key={index}>
-              <table className="ocr-table">
-                <tbody>
-                  {block.rows.map((row, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {row.map((cell, cellIndex) => {
-                        const Cell = rowIndex === 0 ? "th" : "td";
-                        return <Cell key={cellIndex}>{cell}</Cell>;
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        }
-        return <p key={index}>{block.text}</p>;
-      })}
-    </div>
+    <>
+      <div className="markdown-lite">
+        {blocks.map((block, index) => {
+          if (block.type === "heading") return <h4 key={index}><FormattedText text={block.text} /></h4>;
+          if (block.type === "image") {
+            return (
+              <figure className="ocr-figure" key={index}>
+                <button
+                  aria-label="Agrandir l'image"
+                  className="ocr-image-button"
+                  onClick={() => setZoomedImage(block)}
+                  type="button"
+                >
+                  <img alt={block.alt || "Figure du sujet"} src={block.src} />
+                </button>
+                {block.alt ? <figcaption><FormattedText text={block.alt} /></figcaption> : null}
+              </figure>
+            );
+          }
+          if (block.type === "table") {
+            return (
+              <div className="ocr-table-wrap" key={index}>
+                <table className="ocr-table">
+                  <tbody>
+                    {block.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, cellIndex) => {
+                          const Cell = rowIndex === 0 ? "th" : "td";
+                          return <Cell key={cellIndex}><FormattedText text={cell} /></Cell>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+          return <p key={index}><FormattedText text={block.text} /></p>;
+        })}
+      </div>
+      {zoomedImage ? (
+        <div className="image-zoom-backdrop" onClick={() => setZoomedImage(null)} role="presentation">
+          <div
+            className="image-zoom-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image agrandie"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button className="image-zoom-close" onClick={() => setZoomedImage(null)} type="button">Fermer</button>
+            <img alt={zoomedImage.alt || "Figure du sujet"} src={zoomedImage.src} />
+            {zoomedImage.alt ? <p><FormattedText text={zoomedImage.alt} /></p> : null}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
+}
+
+function FormattedText({ text }) {
+  return renderFormattedText(text);
+}
+
+function renderFormattedText(text) {
+  const raw = String(text || "");
+  const parts = [];
+  const regex = /\$([^$]+)\$/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(raw))) {
+    if (match.index > lastIndex) parts.push(renderPlainText(raw.slice(lastIndex, match.index), `t${lastIndex}`));
+    parts.push(<span className="formula" key={`f${match.index}`}>{renderFormula(match[1])}</span>);
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < raw.length) parts.push(renderPlainText(raw.slice(lastIndex), `t${lastIndex}`));
+  return parts.flat();
+}
+
+function renderPlainText(text, keyPrefix) {
+  return String(text || "")
+    .split(/(\^{[^}]+}|_[{][^}]+[}]|\^[+-]|\d+\^\-?\d+)/g)
+    .filter((part) => part !== "")
+    .map((part, index) => renderFormulaToken(part, `${keyPrefix}-${index}`));
+}
+
+function renderFormula(formula) {
+  const tokens = [];
+  const regex = /(\^{[^}]+}|_\{[^}]+}|_[A-Za-z0-9+\-]+|\^[A-Za-z0-9+\-]+|[A-Za-z]+|\d+|[+\-=(),./])/g;
+  let match;
+  while ((match = regex.exec(formula))) {
+    tokens.push(renderFormulaToken(match[1], `m${match.index}`));
+  }
+  return tokens.length ? tokens : formula;
+}
+
+function renderFormulaToken(token, key) {
+  const value = String(token || "");
+  if (value.startsWith("^{") && value.endsWith("}")) return <sup key={key}>{value.slice(2, -1)}</sup>;
+  if (value.startsWith("_{") && value.endsWith("}")) return <sub key={key}>{value.slice(2, -1)}</sub>;
+  if (value.startsWith("^")) return <sup key={key}>{value.slice(1)}</sup>;
+  if (value.startsWith("_")) return <sub key={key}>{value.slice(1)}</sub>;
+  return <span key={key}>{value}</span>;
 }
 
 function markdownBlocks(content) {
