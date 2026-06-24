@@ -873,6 +873,71 @@ textarea:focus {
   white-space: pre-line;
 }
 
+.markdown-lite {
+  display: grid;
+  gap: 14px;
+}
+
+.markdown-lite h4 {
+  color: var(--ink);
+  font-size: 0.98rem;
+  margin: 4px 0 0;
+}
+
+.markdown-lite p {
+  margin: 0;
+}
+
+.ocr-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.ocr-table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+
+.ocr-table th,
+.ocr-table td {
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  color: var(--ink);
+  font-size: 0.84rem;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ocr-table th {
+  background: var(--panel-soft);
+  font-weight: 900;
+}
+
+.ocr-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.ocr-figure {
+  margin: 0;
+}
+
+.ocr-figure img {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
+.ocr-figure figcaption {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+  margin-top: 6px;
+}
+
 .mastery-card {
   box-shadow: none;
   padding: 16px;

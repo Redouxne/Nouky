@@ -78,6 +78,9 @@ export function publicCasePayload(caseSession) {
       id: question.id,
       type: question.type || "case",
       text: question.text,
+      sectionId: question.sectionId || "",
+      sectionTitle: question.sectionTitle || "",
+      sectionStatement: question.sectionStatement || "",
       options: safeArray(question.options).map((option) => ({
         id: String(option.id),
         text: String(option.text),
@@ -131,11 +134,15 @@ export async function generateQcmContent({ subjectId, count = 10 }) {
 export async function correctAnswer({ caseSession, question, userAnswer }) {
   const biologicalData = JSON.parse(caseSession.biologicalJson || "[]");
   const maxScore = totalPoints(question.grading);
+  const sectionStatement = sanitizeStatementForCorrection(question.sectionStatement);
+  const statement = question.sectionStatement
+    ? `${caseSession.statement}\n\n${question.sectionTitle || "Énoncé"}\n${sectionStatement}`
+    : caseSession.statement;
 
   try {
     const raw = await mistralChat(
       correctionMessages({
-        statement: caseSession.statement,
+        statement,
         biologicalData,
         question,
         userAnswer,
@@ -146,6 +153,12 @@ export async function correctAnswer({ caseSession, question, userAnswer }) {
   } catch (error) {
     return fallbackCorrection(question, userAnswer, maxScore);
   }
+}
+
+function sanitizeStatementForCorrection(value) {
+  return String(value || "")
+    .replace(/!\[([^\]]*)\]\(data:image\/[^)]*\)/g, (_, alt) => `[Figure OCR : ${alt || "image du sujet"}]`)
+    .slice(0, 12000);
 }
 
 export function correctQcmAnswer({ question, selectedOptionIds }) {

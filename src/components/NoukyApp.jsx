@@ -894,6 +894,122 @@ function TimerPill({ label, seconds }) {
   );
 }
 
+function MarkdownLite({ content }) {
+  const blocks = markdownBlocks(content);
+  return (
+    <div className="markdown-lite">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") return <h4 key={index}>{block.text}</h4>;
+        if (block.type === "image") {
+          return (
+            <figure className="ocr-figure" key={index}>
+              <img alt={block.alt || "Figure du sujet"} src={block.src} />
+              {block.alt ? <figcaption>{block.alt}</figcaption> : null}
+            </figure>
+          );
+        }
+        if (block.type === "table") {
+          return (
+            <div className="ocr-table-wrap" key={index}>
+              <table className="ocr-table">
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => {
+                        const Cell = rowIndex === 0 ? "th" : "td";
+                        return <Cell key={cellIndex}>{cell}</Cell>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        return <p key={index}>{block.text}</p>;
+      })}
+    </div>
+  );
+}
+
+function markdownBlocks(content) {
+  const lines = String(content || "").split("\n");
+  const blocks = [];
+  let paragraph = [];
+
+  function flushParagraph() {
+    const text = cleanDisplayText(paragraph.join(" "));
+    if (text) blocks.push({ type: "paragraph", text });
+    paragraph = [];
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) {
+      flushParagraph();
+      continue;
+    }
+
+    const image = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (image) {
+      flushParagraph();
+      blocks.push({ type: "image", alt: cleanDisplayText(image[1]), src: image[2] });
+      continue;
+    }
+
+    if (isMarkdownTableLine(line)) {
+      flushParagraph();
+      const rows = [];
+      while (index < lines.length && isMarkdownTableLine(lines[index].trim())) {
+        const rowLine = lines[index].trim();
+        if (!isMarkdownSeparatorRow(rowLine)) rows.push(parseMarkdownTableRow(rowLine));
+        index += 1;
+      }
+      index -= 1;
+      if (rows.length) blocks.push({ type: "table", rows });
+      continue;
+    }
+
+    const heading = line.match(/^#{1,4}\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      blocks.push({ type: "heading", text: cleanDisplayText(heading[1]) });
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return blocks;
+}
+
+function isMarkdownTableLine(line) {
+  return line.includes("|") && line.split("|").length >= 3;
+}
+
+function isMarkdownSeparatorRow(line) {
+  return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line);
+}
+
+function parseMarkdownTableRow(line) {
+  return line
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cleanDisplayText(cell));
+}
+
+function cleanDisplayText(value) {
+  return String(value || "").replace(/\*\*/g, "").replace(/`/g, "").replace(/\s+/g, " ").trim();
+}
+
+function annaleQuestionLabel(question, index) {
+  const match = String(question.id || "").match(/(?:exercice|dossier)_(\d+)_q(\d+)/);
+  if (!match) return `Q${index + 1}`;
+  return `${question.sectionTitle || `Exercice ${match[1]}`} · Q${match[2]}`;
+}
+
 function AnnalesTab(props) {
   const {
     activeAnnale,
@@ -1071,6 +1187,8 @@ function AnnaleRunner(props) {
   const selected = currentQuestion ? selections[currentQuestion.id] || [] : [];
   const isQcm = currentQuestion?.options?.length > 0;
   const questionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
+  const currentSectionTitle = currentQuestion?.sectionTitle || "Énoncé";
+  const currentSectionStatement = currentQuestion?.sectionStatement || session.statement;
   const totalQuestions = session.questions.length;
   const nextQuestionIndex = session.questions.findIndex((question, index) => index > currentQuestionIndex && !corrections[question.id]);
   const fallbackNextIndex = currentQuestionIndex + 1 < totalQuestions ? currentQuestionIndex + 1 : -1;
@@ -1104,8 +1222,8 @@ function AnnaleRunner(props) {
             </div>
           </div>
           <div className="document-body annale-statement">
-            <h3>Énoncé</h3>
-            <p>{session.statement}</p>
+            <h3>{currentSectionTitle}</h3>
+            <MarkdownLite content={currentSectionStatement} />
           </div>
           <div className="qcm-question-list">
             {session.questions.map((question, index) => (
@@ -1115,7 +1233,7 @@ function AnnaleRunner(props) {
                 onClick={() => setCurrentQuestionIndex(index)}
                 type="button"
               >
-                Q{index + 1} · {corrections[question.id] ? formatScore(corrections[question.id].score, corrections[question.id].maxScore) : `${question.maxScore} pt`}
+                {annaleQuestionLabel(question, index)} · {corrections[question.id] ? formatScore(corrections[question.id].score, corrections[question.id].maxScore) : `${question.maxScore} pt`}
               </button>
             ))}
           </div>
@@ -1132,7 +1250,9 @@ function AnnaleRunner(props) {
 
           {currentQuestion ? (
             <form className={isQcm ? "qcm-form" : "answer-form"} onSubmit={submitAnswer}>
-              <p className="qcm-stem">{currentQuestion.text}</p>
+              <div className="qcm-stem">
+                <MarkdownLite content={currentQuestion.text} />
+              </div>
               {isQcm ? (
                 <div className="option-list">
                   {currentQuestion.options.map((option) => (

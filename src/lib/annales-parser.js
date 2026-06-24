@@ -89,14 +89,14 @@ async function parsePdfAnnale(annale) {
     text = "";
   }
 
-  let questions = parseStructuredPdfQuestions(text, annale);
-  if (!questions.length) {
+  let parsed = parseStructuredPdfQuestions(text, annale);
+  if (!parsed.questions.length) {
     extractionSource = "ocr";
     text = await fetchMistralOcrText(annale.url);
-    questions = parseStructuredPdfQuestions(text, annale);
+    parsed = parseStructuredPdfQuestions(text, annale);
   }
 
-  if (!questions.length) {
+  if (!parsed.questions.length) {
     throw new Error("Impossible de parser les questions du PDF, même après OCR Mistral");
   }
   const normalizedText = normalizeAnnalePdfText(text);
@@ -106,28 +106,166 @@ async function parsePdfAnnale(annale) {
     subject: `Annales - ${annale.typeLabel}`,
     difficulty: "annale",
     hiddenDiagnosis: "",
-    statement: buildPdfStatement(normalizedText, annale, extractionSource),
+    statement: buildPdfStatement(normalizedText, annale, extractionSource, parsed.sections),
     biologicalData: [],
-    questions,
+    questions: parsed.questions,
   };
 }
 
 function parseStructuredPdfQuestions(text, annale) {
   const normalized = normalizeAnnalePdfText(text);
-  const questionRegex =
-    /QUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)\nPROPOSITION\s+DE\s+RÉPONSE\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\nDOSSIER\s+N[°º]\s*\d+|\nEXERCICE\s+N[°º]\s*\d+|$)/gi;
+  const sectionBuckets = collectSectionBuckets(normalized, annale);
+  const questions = [];
+  const sections = [];
+
+  for (const bucket of sectionBuckets.values()) {
+    const subjectText = cleanText(bucket.subjectChunks.join("\n\n"));
+    const correctionText = cleanText(bucket.correctionChunks.join("\n\n"));
+    const sectionStatement = extractSectionStatement(subjectText, bucket);
+    const subjectQuestions = extractQuestionBlocks(subjectText);
+    const correctionQuestions = extractCorrectionBlocks(correctionText);
+    if (!subjectQuestions.length) continue;
+
+    sections.push({
+      id: bucket.id,
+      title: bucket.title,
+      statement: sectionStatement,
+      questionCount: subjectQuestions.length,
+    });
+
+    for (const question of subjectQuestions) {
+      const expectedAnswer = correctionQuestions.get(question.number) || "";
+      questions.push({
+        id: `${bucket.id}_q${question.number}`,
+        type: "annale_free_text",
+        text: question.text,
+        sectionId: bucket.id,
+        sectionTitle: bucket.title,
+        sectionStatement,
+        expectedAnswer: expectedAnswer || "Proposition de réponse non détectée dans l'OCR.",
+        keywords: extractKeywords(expectedAnswer),
+        grading: [{ item: "Réponse attendue", points: 6 }],
+        commonMistakes: [],
+        relatedLeitnerSkills: [annaleQuestionSkill(annale, questions.length + 1, question.number)],
+      });
+    }
+  }
+
+  if (questions.length) return { questions, sections };
+  return { questions: parseInlineCorrectionQuestions(normalized, annale), sections: [] };
+}
+
+function collectSectionBuckets(text, annale) {
+  const fallbackKind = annale.type === "dossiers" ? "DOSSIER" : "EXERCICE";
+  const sectionRegex = /(?:^|\n)((?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+(?:[^\n]*)?)/gi;
+  const matches = [...text.matchAll(sectionRegex)];
+  const chunks = [];
+
+  if (!matches.length) {
+    chunks.push({
+      header: `${fallbackKind} N° 1`,
+      body: text,
+    });
+  } else {
+    for (let index = 0; index < matches.length; index += 1) {
+      const match = matches[index];
+      const start = match.index ?? 0;
+      const end = matches[index + 1]?.index ?? text.length;
+      chunks.push({
+        header: cleanText(match[1]),
+        body: text.slice(start, end),
+      });
+    }
+  }
+
+  const buckets = new Map();
+  for (const chunk of chunks) {
+    const header = chunk.header.match(/(DOSSIER|EXERCICE)\s+N[°º]\s*(\d+)/i);
+    const kind = (header?.[1] || fallbackKind).toUpperCase();
+    const number = Number(header?.[2] || 1);
+    const id = `${kind.toLowerCase()}_${number}`;
+    const bucket = buckets.get(id) || {
+      id,
+      kind,
+      number,
+      title: `${kind === "DOSSIER" ? "Dossier" : "Exercice"} ${number}`,
+      subjectChunks: [],
+      correctionChunks: [],
+    };
+    const cleanedBody = stripRepeatingPageNoise(chunk.body);
+    const looksLikeCorrection =
+      /PROPOSITION\s+DE\s+RÉPONSE/i.test(cleanedBody) ||
+      (bucket.correctionChunks.length > 0 && !/(^|\n)Énoncé\s*($|\n)|(^|\n)Questions?\s*($|\n)/i.test(cleanedBody));
+    if (looksLikeCorrection) bucket.correctionChunks.push(cleanedBody);
+    else bucket.subjectChunks.push(cleanedBody);
+    buckets.set(id, bucket);
+  }
+
+  return buckets;
+}
+
+function extractSectionStatement(text, bucket) {
+  const beforeQuestions = splitBeforeFirstQuestion(text);
+  const withoutHeader = beforeQuestions
+    .replace(new RegExp(`${bucket.kind}\\s+N[°º]\\s*${bucket.number}[^\\n]*`, "gi"), "")
+    .replace(/ÉPREUVE\s+D['’]\s*(?:EXERCICE|EXERCICES|DOSSIERS)[^\n]*/gi, "")
+    .replace(/\bCE\d+\b/gi, "")
+    .replace(/^PAGE OCR \d+$/gim, "")
+    .replace(/^#+\s*Énoncé\s*$/gim, "")
+    .replace(/^Énoncé\s*$/gim, "")
+    .replace(/^Questions?\s*$/gim, "");
+  return cleanText(withoutHeader);
+}
+
+function splitBeforeFirstQuestion(text) {
+  const firstQuestion = text.search(/\nQUESTION\s+N[°º]\s*\d+/i);
+  if (firstQuestion === -1) return text;
+  return text.slice(0, firstQuestion);
+}
+
+function extractQuestionBlocks(text) {
+  const withoutCorrections = text.replace(/\nPROPOSITION\s+DE\s+RÉPONSE[\s\S]*$/i, "");
+  const questionRegex = /\nQUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\n(?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+|$)/gi;
   const questions = [];
   let match;
-  while ((match = questionRegex.exec(normalized))) {
+  while ((match = questionRegex.exec(withoutCorrections))) {
+    const number = Number(match[1]);
+    const questionText = cleanQuestionText(match[2]);
+    if (number && questionText) questions.push({ number, text: questionText });
+  }
+  return questions;
+}
+
+function extractCorrectionBlocks(text) {
+  const corrections = new Map();
+  const questionRegex = /\nQUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\n(?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+|$)/gi;
+  let match;
+  while ((match = questionRegex.exec(text))) {
+    const number = Number(match[1]);
+    const body = match[2] || "";
+    const answerStart = body.search(/\nPROPOSITION\s+DE\s+RÉPONSE/i);
+    if (!number || answerStart === -1) continue;
+    const expectedAnswer = cleanQuestionText(body.slice(answerStart).replace(/\nPROPOSITION\s+DE\s+RÉPONSE\s*:?\s*/i, ""));
+    if (expectedAnswer) corrections.set(number, expectedAnswer);
+  }
+  return corrections;
+}
+
+function parseInlineCorrectionQuestions(text, annale) {
+  const questionRegex =
+    /\nQUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)\nPROPOSITION\s+DE\s+RÉPONSE\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\nDOSSIER\s+N[°º]\s*\d+|\nEXERCICE\s+N[°º]\s*\d+|$)/gi;
+  const questions = [];
+  let match;
+  while ((match = questionRegex.exec(text))) {
     const number = questions.length + 1;
     const officialNumber = Number(match[1]) || number;
-    const text = cleanText(match[2]);
-    const expectedAnswer = cleanText(match[3]);
-    if (!text || !expectedAnswer) continue;
+    const questionText = cleanQuestionText(match[2]);
+    const expectedAnswer = cleanQuestionText(match[3]);
+    if (!questionText || !expectedAnswer) continue;
     questions.push({
       id: `q${number}`,
       type: "annale_free_text",
-      text,
+      text: questionText,
       expectedAnswer,
       keywords: extractKeywords(expectedAnswer),
       grading: [{ item: "Réponse attendue", points: 6 }],
@@ -139,21 +277,42 @@ function parseStructuredPdfQuestions(text, annale) {
 }
 
 function normalizeAnnalePdfText(text) {
-  return cleanText(text)
+  return String(text || "")
     .replace(/\r/g, "\n")
+    .replace(/(^|\n)\s*#+\s*/g, "\n")
     .replace(/\s*(Dossier)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nDOSSIER N° $2")
     .replace(/\s*(Exercice)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nEXERCICE N° $2")
     .replace(/\s*(Question)\s*(?:N[°ºo]\s*)?(\d+)/gi, "\nQUESTION N° $2")
     .replace(/\s*(?:Proposition\s+de\s+r[ée]ponse[s]?|Corrig[ée]|Correction)\s*:?\s*/gi, "\nPROPOSITION DE RÉPONSE\n")
+    .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function buildPdfStatement(text, annale, extractionSource) {
-  const firstQuestion = text.search(/QUESTION\s+N[°º]\s*\d+/i);
-  const statement = firstQuestion > 0 ? text.slice(0, firstQuestion) : text.slice(0, 2500);
+function buildPdfStatement(text, annale, extractionSource, sections) {
   const sourceLabel = extractionSource === "ocr" ? "Extraction OCR Mistral" : "Extraction PDF";
-  return cleanText(`${annale.label}\n${sourceLabel}\n\n${statement}`).slice(0, 5000);
+  const sectionSummary = sections?.length
+    ? sections.map((section) => `${section.title} - ${section.questionCount} question(s)`).join("\n")
+    : splitBeforeFirstQuestion(text).slice(0, 2500);
+  return cleanText(`${annale.label}\n${sourceLabel}\n\n${sectionSummary}`).slice(0, 5000);
+}
+
+function stripRepeatingPageNoise(text) {
+  return cleanText(text)
+    .replace(/^PAGE OCR \d+$/gim, "")
+    .replace(/\bPage\s+\d+\s*\/\s*\d+\b/gi, "")
+    .replace(/^\s*\d{1,6}\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function cleanQuestionText(value) {
+  return cleanText(value)
+    .replace(/^PAGE OCR \d+$/gim, "")
+    .replace(/^Questions?\s*$/gim, "")
+    .replace(/^Énoncé\s*$/gim, "")
+    .replace(/\bPage\s+\d+\s*\/\s*\d+\b/gi, "")
+    .trim();
 }
 
 function extractPdfText(buffer) {
@@ -232,6 +391,8 @@ async function fetchMistralOcrText(url) {
       },
       body: JSON.stringify({
         model: "mistral-ocr-latest",
+        include_image_base64: true,
+        table_format: "markdown",
         document: {
           type: "document_url",
           document_url: url,
@@ -257,10 +418,22 @@ async function fetchMistralOcrText(url) {
 
   const payload = await response.json();
   const pages = safeArray(payload?.pages)
-    .map((page) => String(page?.markdown || ""))
+    .map((page, index) => cleanText(`PAGE OCR ${index + 1}\n\n${embedOcrImages(page)}`))
     .filter(Boolean);
   if (!pages.length) throw new Error("OCR Mistral n'a retourné aucun texte exploitable");
   return pages.join("\n\n");
+}
+
+function embedOcrImages(page) {
+  let markdown = String(page?.markdown || "");
+  for (const image of safeArray(page?.images)) {
+    const id = String(image?.id || image?.image_id || "");
+    const base64 = String(image?.image_base64 || "");
+    if (!id || !base64) continue;
+    const dataUrl = base64.startsWith("data:") ? base64 : `data:image/png;base64,${base64}`;
+    markdown = markdown.replaceAll(`](${id})`, `](${dataUrl})`);
+  }
+  return markdown;
 }
 
 async function fetchAnnaleResource(url) {
