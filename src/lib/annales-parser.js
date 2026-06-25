@@ -131,6 +131,7 @@ function parseStructuredPdfQuestions(text, annale) {
       title: bucket.title,
       statement: sectionStatement,
       questionCount: subjectQuestions.length,
+      sourcePage: bucket.sourcePage || 0,
     });
 
     for (const question of subjectQuestions) {
@@ -142,6 +143,7 @@ function parseStructuredPdfQuestions(text, annale) {
         sectionId: bucket.id,
         sectionTitle: bucket.title,
         sectionStatement,
+        sourcePage: bucket.sourcePage || 0,
         expectedAnswer,
         correctionSource: expectedAnswer ? "official_proposed_answer" : "missing",
         keywords: extractKeywords(expectedAnswer),
@@ -167,6 +169,7 @@ function collectSectionBuckets(text, annale) {
     chunks.push({
       header: `${fallbackKind} N° 1`,
       body: text,
+      sourcePage: findSourcePageBefore(text, 0),
     });
   } else {
     for (let index = 0; index < matches.length; index += 1) {
@@ -176,6 +179,7 @@ function collectSectionBuckets(text, annale) {
       chunks.push({
         header: cleanText(match[1]),
         body: text.slice(start, end),
+        sourcePage: findSourcePageBefore(text, start),
       });
     }
   }
@@ -192,9 +196,11 @@ function collectSectionBuckets(text, annale) {
       kind,
       number,
       title: `${kind === "DOSSIER" ? "Dossier" : "Exercice"} ${number}`,
+      sourcePage: chunk.sourcePage || 0,
       subjectChunks: [],
       correctionChunks: [],
     };
+    if (!bucket.sourcePage && chunk.sourcePage) bucket.sourcePage = chunk.sourcePage;
     const cleanedBody = stripRepeatingPageNoise(chunk.body);
     const looksLikeCorrection =
       /PROPOSITION\s+DE\s+RÉPONSE/i.test(cleanedBody) ||
@@ -205,6 +211,13 @@ function collectSectionBuckets(text, annale) {
   }
 
   return buckets;
+}
+
+function findSourcePageBefore(text, index) {
+  const before = String(text || "").slice(0, Math.max(0, index));
+  const matches = [...before.matchAll(/PAGE OCR\s+(\d+)/gi)];
+  const last = matches.at(-1);
+  return last ? Number(last[1] || 0) : 0;
 }
 
 function extractSectionStatement(text, bucket) {

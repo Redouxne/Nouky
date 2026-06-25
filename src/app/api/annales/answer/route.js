@@ -17,8 +17,8 @@ export async function POST(request) {
   if (!session) return Response.json({ error: "Non authentifié" }, { status: 401 });
 
   try {
-    const { caseSessionId, questionId, answer, selectedOptionIds = [], durationSeconds } = await request.json();
-    if (!caseSessionId || !questionId) {
+    const { caseSessionId, questionId, sectionId, answer, selectedOptionIds = [], durationSeconds } = await request.json();
+    if (!caseSessionId || (!questionId && !sectionId)) {
       return Response.json({ error: "Réponse incomplète" }, { status: 400 });
     }
 
@@ -30,7 +30,9 @@ export async function POST(request) {
     }
 
     const questions = JSON.parse(caseSession.questionsJson);
-    const question = questions.find((item) => item.id === questionId);
+    const question = sectionId
+      ? buildSectionQuestion(sectionId, questions)
+      : questions.find((item) => item.id === questionId);
     if (!question) return Response.json({ error: "Question introuvable" }, { status: 404 });
 
     const isQcm = question.options?.length > 0;
@@ -51,7 +53,7 @@ export async function POST(request) {
       data: {
         userId: session.id,
         caseSessionId: caseSession.id,
-        questionId,
+        questionId: sectionId || questionId,
         userAnswer,
         correctionJson: JSON.stringify(timedCorrection),
         score: timedCorrection.score,
@@ -110,4 +112,50 @@ function normalizeDurationSeconds(value) {
   const seconds = Math.round(Number(value || 0));
   if (!Number.isFinite(seconds)) return 0;
   return Math.min(Math.max(seconds, 0), 4 * 60 * 60);
+}
+
+function buildSectionQuestion(sectionId, questions) {
+  const sectionQuestions = questions.filter((question) => question.sectionId === sectionId);
+  if (!sectionQuestions.length) return null;
+
+  const first = sectionQuestions[0];
+  const sectionTitle = first.sectionTitle || "Exercice";
+  const questionText = sectionQuestions
+    .map((question, index) => `${annaleQuestionLabel(question, index)}\n${question.text}`)
+    .join("\n\n");
+  const expectedAnswer = sectionQuestions
+    .map((question, index) => {
+      const answer = String(question.expectedAnswer || "").trim();
+      return `${annaleQuestionLabel(question, index)}\n${answer || "Correction officielle non détectée."}`;
+    })
+    .join("\n\n");
+
+  return {
+    id: sectionId,
+    type: "annale_section_copy",
+    text: questionText,
+    sectionId,
+    sectionTitle,
+    sectionStatement: first.sectionStatement || "",
+    correctionSource: sectionQuestions.every((question) => question.expectedAnswer)
+      ? "official_proposed_answer"
+      : "missing",
+    expectedAnswer,
+    keywords: uniqueStrings(sectionQuestions.flatMap((question) => question.keywords || [])).slice(0, 40),
+    grading: sectionQuestions.map((question, index) => ({
+      item: `${sectionTitle} - ${annaleQuestionLabel(question, index)}`,
+      points: totalPoints(question.grading) || 6,
+    })),
+    commonMistakes: uniqueStrings(sectionQuestions.flatMap((question) => question.commonMistakes || [])),
+    relatedLeitnerSkills: uniqueStrings(sectionQuestions.flatMap((question) => question.relatedLeitnerSkills || [])),
+  };
+}
+
+function annaleQuestionLabel(question, index) {
+  const match = String(question.id || "").match(/_q(\d+)$/);
+  return `Q${match?.[1] || index + 1}`;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
 }

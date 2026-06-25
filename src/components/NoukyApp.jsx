@@ -90,7 +90,9 @@ export default function NoukyApp({ user }) {
   const [activeAnnale, setActiveAnnale] = useState(null);
   const [annaleSession, setAnnaleSession] = useState(null);
   const [currentAnnaleIndex, setCurrentAnnaleIndex] = useState(0);
+  const [currentAnnaleSectionId, setCurrentAnnaleSectionId] = useState("");
   const [annaleAnswerDraft, setAnnaleAnswerDraft] = useState("");
+  const [annaleSectionDrafts, setAnnaleSectionDrafts] = useState({});
   const [annaleSelections, setAnnaleSelections] = useState({});
   const [annaleCorrections, setAnnaleCorrections] = useState({});
   const [annaleStartedAtMs, setAnnaleStartedAtMs] = useState(null);
@@ -166,6 +168,12 @@ export default function NoukyApp({ user }) {
       setAnnaleQuestionStartedAtMs(Date.now());
     }
   }, [annaleSession?.id, currentAnnaleQuestion?.id]);
+
+  useEffect(() => {
+    if (annaleSession && activeAnnale?.type !== "qcm" && currentAnnaleSectionId && !annaleCorrections[currentAnnaleSectionId]) {
+      setAnnaleQuestionStartedAtMs(Date.now());
+    }
+  }, [annaleSession?.id, activeAnnale?.type, currentAnnaleSectionId]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -356,7 +364,9 @@ export default function NoukyApp({ user }) {
       setActiveAnnale(data.annale);
       setAnnaleSession(data.annaleSession);
       setCurrentAnnaleIndex(0);
+      setCurrentAnnaleSectionId(getAnnaleSections(data.annaleSession?.questions || [])[0]?.id || "");
       setAnnaleAnswerDraft("");
+      setAnnaleSectionDrafts({});
       setAnnaleSelections({});
       setAnnaleCorrections({});
       const startedAt = Date.now();
@@ -375,9 +385,11 @@ export default function NoukyApp({ user }) {
     setActiveAnnale(null);
     setAnnaleSession(null);
     setAnnaleAnswerDraft("");
+    setAnnaleSectionDrafts({});
     setAnnaleSelections({});
     setAnnaleCorrections({});
     setCurrentAnnaleIndex(0);
+    setCurrentAnnaleSectionId("");
   }
 
   function toggleAnnaleOption(questionId, optionId) {
@@ -420,6 +432,49 @@ export default function NoukyApp({ user }) {
       setAnnaleCorrections(nextCorrections);
       setAnnaleAnswerDraft("");
       if (activeAnnale && Object.keys(nextCorrections).length === annaleSession.questions.length) {
+        const totalScore = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.score || 0), 0);
+        const totalMax = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.maxScore || 0), 0);
+        updateAnnaleProgress(activeAnnale.id, {
+          status: "done",
+          score: totalMax ? Math.round((totalScore / totalMax) * 100) : "",
+          scoreSource: "agent",
+        });
+      }
+      setProgress(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function submitAnnaleSectionAnswer(event, section) {
+    event.preventDefault();
+    if (!activeAnnale || !annaleSession || !section) return;
+
+    const answer = annaleSectionDrafts[section.id] || "";
+    if (!answer.trim()) return;
+
+    setLoading("annale-answer");
+    setError("");
+    try {
+      const durationSeconds = elapsedSeconds(annaleQuestionStartedAtMs);
+      const data = await fetchJson("/api/annales/answer", {
+        method: "POST",
+        body: JSON.stringify({
+          caseSessionId: annaleSession.id,
+          sectionId: section.id,
+          answer,
+          durationSeconds,
+        }),
+      });
+      const nextCorrections = {
+        ...annaleCorrections,
+        [section.id]: data.correction,
+      };
+      setAnnaleCorrections(nextCorrections);
+      const sectionCount = getAnnaleSections(annaleSession.questions).length;
+      if (Object.keys(nextCorrections).length === sectionCount) {
         const totalScore = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.score || 0), 0);
         const totalMax = Object.values(nextCorrections).reduce((sum, correction) => sum + Number(correction.maxScore || 0), 0);
         updateAnnaleProgress(activeAnnale.id, {
@@ -528,12 +583,14 @@ export default function NoukyApp({ user }) {
           annaleAnswerDraft={annaleAnswerDraft}
           annaleCorrections={annaleCorrections}
           annaleQuestionStartedAtMs={annaleQuestionStartedAtMs}
+          annaleSectionDrafts={annaleSectionDrafts}
           annaleSelections={annaleSelections}
           annaleSession={annaleSession}
           annaleStartedAtMs={annaleStartedAtMs}
           closeAnnaleSession={closeAnnaleSession}
           currentQuestion={currentAnnaleQuestion}
           currentQuestionIndex={currentAnnaleIndex}
+          currentSectionId={currentAnnaleSectionId}
           error={error}
           loadAnnale={loadAnnale}
           loading={loading}
@@ -541,10 +598,13 @@ export default function NoukyApp({ user }) {
           nowMs={nowMs}
           progress={annaleProgress}
           setAnnaleAnswerDraft={setAnnaleAnswerDraft}
+          setAnnaleSectionDrafts={setAnnaleSectionDrafts}
           setCurrentQuestionIndex={setCurrentAnnaleIndex}
+          setCurrentSectionId={setCurrentAnnaleSectionId}
           setTypeFilter={setAnnaleTypeFilter}
           setYearFilter={setAnnaleYearFilter}
           submitAnswer={submitAnnaleAnswer}
+          submitSectionAnswer={submitAnnaleSectionAnswer}
           toggleOption={toggleAnnaleOption}
           totalScore={annaleTotalScore}
           typeFilter={annaleTypeFilter}
@@ -1294,12 +1354,14 @@ function AnnalesTab(props) {
     annaleAnswerDraft,
     annaleCorrections,
     annaleQuestionStartedAtMs,
+    annaleSectionDrafts,
     annaleSelections,
     annaleSession,
     annaleStartedAtMs,
     closeAnnaleSession,
     currentQuestion,
     currentQuestionIndex,
+    currentSectionId,
     error,
     loadAnnale,
     loading,
@@ -1307,10 +1369,13 @@ function AnnalesTab(props) {
     nowMs,
     progress,
     setAnnaleAnswerDraft,
+    setAnnaleSectionDrafts,
     setCurrentQuestionIndex,
+    setCurrentSectionId,
     setTypeFilter,
     setYearFilter,
     submitAnswer,
+    submitSectionAnswer,
     toggleOption,
     totalScore,
     typeFilter,
@@ -1332,15 +1397,20 @@ function AnnalesTab(props) {
         corrections={annaleCorrections}
         currentQuestion={currentQuestion}
         currentQuestionIndex={currentQuestionIndex}
+        currentSectionId={currentSectionId}
         loading={loading}
         nowMs={nowMs}
         questionStartedAtMs={annaleQuestionStartedAtMs}
+        sectionDrafts={annaleSectionDrafts}
         selections={annaleSelections}
         session={annaleSession}
         sessionStartedAtMs={annaleStartedAtMs}
         setAnswerDraft={setAnnaleAnswerDraft}
         setCurrentQuestionIndex={setCurrentQuestionIndex}
+        setCurrentSectionId={setCurrentSectionId}
+        setSectionDrafts={setAnnaleSectionDrafts}
         submitAnswer={submitAnswer}
+        submitSectionAnswer={submitSectionAnswer}
         toggleOption={toggleOption}
         totalScore={totalScore}
       />
@@ -1449,18 +1519,44 @@ function AnnaleRunner(props) {
     corrections,
     currentQuestion,
     currentQuestionIndex,
+    currentSectionId,
     loading,
     nowMs,
     questionStartedAtMs,
+    sectionDrafts,
     selections,
     session,
     sessionStartedAtMs,
     setAnswerDraft,
     setCurrentQuestionIndex,
+    setCurrentSectionId,
+    setSectionDrafts,
     submitAnswer,
+    submitSectionAnswer,
     toggleOption,
     totalScore,
   } = props;
+  if (activeAnnale.type !== "qcm") {
+    return (
+      <AnnalePdfRunner
+        activeAnnale={activeAnnale}
+        closeSession={closeSession}
+        corrections={corrections}
+        currentSectionId={currentSectionId}
+        loading={loading}
+        nowMs={nowMs}
+        questionStartedAtMs={questionStartedAtMs}
+        sectionDrafts={sectionDrafts}
+        session={session}
+        sessionStartedAtMs={sessionStartedAtMs}
+        setCurrentSectionId={setCurrentSectionId}
+        setSectionDrafts={setSectionDrafts}
+        submitSectionAnswer={submitSectionAnswer}
+        totalScore={totalScore}
+      />
+    );
+  }
+
   const currentCorrection = currentQuestion ? corrections[currentQuestion.id] : null;
   const selected = currentQuestion ? selections[currentQuestion.id] || [] : [];
   const isQcm = currentQuestion?.options?.length > 0;
@@ -1585,6 +1681,141 @@ function AnnaleRunner(props) {
       </div>
     </section>
   );
+}
+
+function AnnalePdfRunner(props) {
+  const {
+    activeAnnale,
+    closeSession,
+    corrections,
+    currentSectionId,
+    loading,
+    nowMs,
+    questionStartedAtMs,
+    sectionDrafts,
+    session,
+    sessionStartedAtMs,
+    setCurrentSectionId,
+    setSectionDrafts,
+    submitSectionAnswer,
+    totalScore,
+  } = props;
+  const sections = getAnnaleSections(session.questions);
+  const selectedSection = sections.find((section) => section.id === currentSectionId) || sections[0];
+  const currentCorrection = selectedSection ? corrections[selectedSection.id] : null;
+  const sectionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
+  const draft = selectedSection ? sectionDrafts[selectedSection.id] || "" : "";
+  const pdfSrc = selectedSection ? buildPdfSource(activeAnnale.url, selectedSection.sourcePage) : activeAnnale.url;
+
+  function updateDraft(value) {
+    if (!selectedSection) return;
+    setSectionDrafts((current) => ({
+      ...current,
+      [selectedSection.id]: value,
+    }));
+  }
+
+  return (
+    <section className="tab-panel">
+      <div className="section-header">
+        <div>
+          <h2>{activeAnnale.label}</h2>
+          <p>{activeAnnale.typeLabel} · {activeAnnale.sessionLabel}</p>
+        </div>
+        <button className="secondary-button" onClick={closeSession} type="button">Retour aux annales</button>
+      </div>
+
+      <div className="case-layout pdf-annale-layout">
+        <article className="panel case-document pdf-annale-document">
+          <div className="panel-header">
+            <div>
+              <div className="eyebrow">{session.subject}</div>
+              <h2>{selectedSection?.title || session.title}</h2>
+            </div>
+            <div className="header-metrics">
+              <TimerPill label="Session" seconds={elapsedSeconds(sessionStartedAtMs, nowMs)} />
+              <span className="score-pill">Score {formatScore(totalScore.score, totalScore.maxScore)}</span>
+            </div>
+          </div>
+
+          <div className="pdf-section-list">
+            {sections.map((section) => (
+              <button
+                key={section.id}
+                className={`question-nav ${section.id === selectedSection?.id ? "active" : ""} ${corrections[section.id] ? "done" : ""}`}
+                onClick={() => setCurrentSectionId(section.id)}
+                type="button"
+              >
+                {section.title} · {corrections[section.id] ? formatScore(corrections[section.id].score, corrections[section.id].maxScore) : `${section.questions.length} question(s)`}
+              </button>
+            ))}
+          </div>
+
+          <div className="pdf-viewer-shell">
+            <iframe className="pdf-viewer" src={pdfSrc} title={`${activeAnnale.label} - ${selectedSection?.title || "PDF"}`} />
+          </div>
+          <div className="pdf-source-row">
+            <a className="secondary-button small" href={pdfSrc} rel="noreferrer" target="_blank">Ouvrir le PDF</a>
+          </div>
+        </article>
+
+        <aside className="panel question-panel pdf-answer-panel">
+          <div className="panel-header">
+            <h2>{selectedSection?.title || "Copie"}</h2>
+            <div className="header-metrics compact">
+              <TimerPill label="Copie" seconds={sectionDuration} />
+              <span className="counter">{sections.findIndex((section) => section.id === selectedSection?.id) + 1}/{sections.length}</span>
+            </div>
+          </div>
+
+          {selectedSection ? (
+            <form className="answer-form pdf-copy-form" onSubmit={(event) => submitSectionAnswer(event, selectedSection)}>
+              <textarea
+                disabled={Boolean(currentCorrection) || loading === "annale-answer"}
+                onChange={(event) => updateDraft(event.target.value)}
+                placeholder={"Q1 Réponse...\n\nQ2 Réponse...\n\nQ3 Réponse..."}
+                value={draft}
+              />
+              <div className="qcm-actions">
+                <button
+                  className="primary-button"
+                  disabled={loading === "annale-answer" || Boolean(currentCorrection) || !draft.trim()}
+                >
+                  {currentCorrection ? "Corrigé" : loading === "annale-answer" ? "Correction..." : "Corriger l'exercice"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {currentCorrection ? <CorrectionBlock correction={currentCorrection} /> : null}
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function getAnnaleSections(questions = []) {
+  const sections = new Map();
+  for (const question of questions) {
+    const fallbackId = question.id || `section_${sections.size + 1}`;
+    const id = question.sectionId || fallbackId;
+    const existing = sections.get(id) || {
+      id,
+      title: question.sectionTitle || `Exercice ${sections.size + 1}`,
+      sourcePage: Number(question.sourcePage || 0),
+      questions: [],
+    };
+    if (!existing.sourcePage && question.sourcePage) existing.sourcePage = Number(question.sourcePage || 0);
+    existing.questions.push(question);
+    sections.set(id, existing);
+  }
+  return [...sections.values()];
+}
+
+function buildPdfSource(url, page) {
+  const pageNumber = Number(page || 0);
+  if (!pageNumber) return url;
+  return `${url}#page=${pageNumber}`;
 }
 
 function getAnnaleStats(progress) {
