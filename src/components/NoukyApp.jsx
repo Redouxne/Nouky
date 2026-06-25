@@ -851,14 +851,13 @@ function QcmCorrectionBlock({ correction }) {
         <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
       ) : null}
       <CorrectionField label="Réponse donnée" value={correction.selectedOptionIds?.join(", ") || "Aucune"} />
-      <CorrectionField label="Réponse attendue" value={correction.expectedAnswer} />
+      <CorrectionField label="Correction" value={getUnifiedCorrectionText(correction)} />
       {correction.majorErrors?.length ? (
         <CorrectionList label="Propositions fausses cochées" items={correction.majorErrors} />
       ) : null}
       {correction.missingKeywords?.length ? (
         <CorrectionList label="Propositions exactes oubliées" items={correction.missingKeywords} />
       ) : null}
-      <CorrectionField label="Explication" value={correction.examStyleCorrection} />
     </div>
   );
 }
@@ -872,8 +871,7 @@ function CorrectionBlock({ correction }) {
       {correction.durationSeconds ? (
         <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
       ) : null}
-      <CorrectionField label="Réponse attendue" value={correction.expectedAnswer} />
-      <CorrectionField label="Correction type" value={correction.examStyleCorrection} />
+      <CorrectionField label="Correction" value={getUnifiedCorrectionText(correction)} />
       {correction.missingKeywords?.length ? (
         <CorrectionList label="Éléments attendus non cités" items={correction.missingKeywords} />
       ) : null}
@@ -883,6 +881,29 @@ function CorrectionBlock({ correction }) {
       <CorrectionField label="Appréciation" value={correction.feedback} />
     </div>
   );
+}
+
+function getUnifiedCorrectionText(correction) {
+  const expected = String(correction?.expectedAnswer || "").trim();
+  const detail = String(correction?.examStyleCorrection || "").trim();
+  const normalizedExpected = normalizeCorrectionText(expected);
+  const normalizedDetail = normalizeCorrectionText(detail);
+
+  if (!expected) return detail;
+  if (!detail) return expected;
+  if (normalizedExpected === normalizedDetail) return detail;
+  if (normalizedDetail.includes(normalizedExpected)) return detail;
+  return `${expected}\n\n${detail}`;
+}
+
+function normalizeCorrectionText(value) {
+  return String(value || "")
+    .replace(/\$+/g, "")
+    .replace(/\\[a-zA-Z]+/g, "")
+    .replace(/[{}_^]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function CorrectionField({ label, value }) {

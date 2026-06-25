@@ -154,6 +154,10 @@ Quand une formule, une unité, un isotope ou une équation est nécessaire dans 
 - groupe les isotopes et espèces chimiques dans une seule formule, par exemple \${}^{99m}\\mathrm{TcO_4^-}$ et pas des fragments séparés ;
 - écris les unités en romain, par exemple $\\mathrm{s}^{-1}$, $\\mathrm{g.mol}^{-1}$ ou $\\mathrm{mL}$ ;
 - n'écris jamais des fragments illisibles du type $^{99m}$TcO$_4^-$.
+Même si le JSON garde expectedAnswer et examStyleCorrection pour compatibilité technique, raisonne comme s'il n'y avait qu'un seul bloc de correction :
+- expectedAnswer contient la correction unifiée, complète et exploitable ;
+- examStyleCorrection ne contient un complément que s'il apporte un raisonnement utile non déjà présent dans expectedAnswer ;
+- si examStyleCorrection répète expectedAnswer, mets une chaîne vide.
 Retour uniquement en JSON valide, sans markdown.`,
     },
     {
