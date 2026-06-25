@@ -119,11 +119,11 @@ function parseStructuredPdfQuestions(text, annale) {
   const sections = [];
 
   for (const bucket of sectionBuckets.values()) {
-    const subjectText = cleanText(bucket.subjectChunks.join("\n\n"));
+    const sectionText = cleanText([...bucket.subjectChunks, ...bucket.correctionChunks].join("\n\n"));
     const correctionText = cleanText(bucket.correctionChunks.join("\n\n"));
-    const sectionStatement = extractSectionStatement(subjectText, bucket);
-    const subjectQuestions = extractQuestionBlocks(subjectText);
-    const correctionQuestions = extractCorrectionBlocks(correctionText);
+    const sectionStatement = extractSectionStatement(sectionText, bucket);
+    const subjectQuestions = extractQuestionBlocks(sectionText);
+    const correctionQuestions = extractCorrectionBlocks(cleanText(`${sectionText}\n\n${correctionText}`));
     if (!subjectQuestions.length) continue;
 
     sections.push({
@@ -158,7 +158,8 @@ function parseStructuredPdfQuestions(text, annale) {
 
 function collectSectionBuckets(text, annale) {
   const fallbackKind = annale.type === "dossiers" ? "DOSSIER" : "EXERCICE";
-  const sectionRegex = /(?:^|\n)((?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+(?:[^\n]*)?)/gi;
+  const sectionRegex =
+    /(?:^|\n)((?:(?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+(?:[^\n]*)?)|(?:(?:\d+\s+)?EXO\s*\d+[A-Z0-9_]*(?:[^\n]*)?))/gi;
   const matches = [...text.matchAll(sectionRegex)];
   const chunks = [];
 
@@ -182,8 +183,9 @@ function collectSectionBuckets(text, annale) {
   const buckets = new Map();
   for (const chunk of chunks) {
     const header = chunk.header.match(/(DOSSIER|EXERCICE)\s+N[°º]\s*(\d+)/i);
-    const kind = (header?.[1] || fallbackKind).toUpperCase();
-    const number = Number(header?.[2] || 1);
+    const legacyExerciseHeader = chunk.header.match(/\bEXO\s*(\d+)/i);
+    const kind = (header?.[1] || (legacyExerciseHeader ? "EXERCICE" : fallbackKind)).toUpperCase();
+    const number = Number(header?.[2] || legacyExerciseHeader?.[1] || 1);
     const id = `${kind.toLowerCase()}_${number}`;
     const bucket = buckets.get(id) || {
       id,
@@ -209,7 +211,9 @@ function extractSectionStatement(text, bucket) {
   const beforeQuestions = splitBeforeFirstQuestion(text);
   const withoutHeader = beforeQuestions
     .replace(new RegExp(`${bucket.kind}\\s+N[°º]\\s*${bucket.number}[^\\n]*`, "gi"), "")
+    .replace(/^\s*(?:\d+\s+)?EXO\s*\d+[A-Z0-9_]*(?:[^\n]*)?$/gim, "")
     .replace(/ÉPREUVE\s+D['’]\s*(?:EXERCICE|EXERCICES|DOSSIERS)[^\n]*/gi, "")
+    .replace(/^Exercice\s+N[°º]\s*(?:\([^)]*\))?\s*$/gim, "")
     .replace(/\bCE\d+\b/gi, "")
     .replace(/^PAGE OCR \d+$/gim, "")
     .replace(/^#+\s*Énoncé\s*$/gim, "")
@@ -225,13 +229,13 @@ function splitBeforeFirstQuestion(text) {
 }
 
 function extractQuestionBlocks(text) {
-  const withoutCorrections = text.replace(/\nPROPOSITION\s+DE\s+RÉPONSE[\s\S]*$/i, "");
   const questionRegex = /\nQUESTION\s+N[°º]\s*(\d+)\s*:?\s*([\s\S]*?)(?=\nQUESTION\s+N[°º]\s*\d+\s*:|\n(?:DOSSIER|EXERCICE)\s+N[°º]\s*\d+|$)/gi;
   const questions = [];
   let match;
-  while ((match = questionRegex.exec(withoutCorrections))) {
+  while ((match = questionRegex.exec(text))) {
     const number = Number(match[1]);
-    const questionText = cleanQuestionText(match[2]);
+    const questionBody = String(match[2] || "").replace(/\nPROPOSITION\s+DE\s+RÉPONSE[\s\S]*$/i, "");
+    const questionText = cleanQuestionText(questionBody);
     if (number && questionText) questions.push({ number, text: questionText });
   }
   return questions;
