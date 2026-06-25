@@ -889,14 +889,84 @@ textarea:focus {
 }
 
 .formula {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  align-items: baseline;
+  display: inline-flex;
+  font-family: Georgia, "Times New Roman", serif;
+  gap: 2px;
   white-space: nowrap;
+}
+
+.formula-block {
+  align-items: center;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  font-size: 1.05rem;
+  justify-content: center;
+  margin: 8px 0;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: nowrap;
+}
+
+.formula-inline-block {
+  display: inline-flex;
+  margin: 0 3px;
 }
 
 .formula sub,
 .formula sup {
   font-size: 0.72em;
   line-height: 0;
+}
+
+.latex-frac {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.05;
+  margin: 0 4px;
+  vertical-align: middle;
+}
+
+.latex-frac-num {
+  border-bottom: 1px solid currentColor;
+  display: block;
+  padding: 0 5px 2px;
+}
+
+.latex-frac-den {
+  display: block;
+  padding: 2px 5px 0;
+}
+
+.correction-field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.correction-field > strong {
+  color: var(--ink);
+}
+
+.correction-rich-text {
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  line-height: 1.55;
+}
+
+.correction-rich-text p {
+  margin: 0;
+}
+
+.correction-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
 }
 
 .ocr-table-wrap {

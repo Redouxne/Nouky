@@ -850,15 +850,15 @@ function QcmCorrectionBlock({ correction }) {
       {correction.durationSeconds ? (
         <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
       ) : null}
-      <p><strong>Réponse donnée :</strong> {correction.selectedOptionIds?.join(", ") || "Aucune"}</p>
-      <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
+      <CorrectionField label="Réponse donnée" value={correction.selectedOptionIds?.join(", ") || "Aucune"} />
+      <CorrectionField label="Réponse attendue" value={correction.expectedAnswer} />
       {correction.majorErrors?.length ? (
-        <p><strong>Propositions fausses cochées :</strong> {correction.majorErrors.join(" ; ")}</p>
+        <CorrectionList label="Propositions fausses cochées" items={correction.majorErrors} />
       ) : null}
       {correction.missingKeywords?.length ? (
-        <p><strong>Propositions exactes oubliées :</strong> {correction.missingKeywords.join(", ")}</p>
+        <CorrectionList label="Propositions exactes oubliées" items={correction.missingKeywords} />
       ) : null}
-      <p><strong>Explication :</strong> {correction.examStyleCorrection}</p>
+      <CorrectionField label="Explication" value={correction.examStyleCorrection} />
     </div>
   );
 }
@@ -872,15 +872,57 @@ function CorrectionBlock({ correction }) {
       {correction.durationSeconds ? (
         <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
       ) : null}
-      <p><strong>Réponse attendue :</strong> {correction.expectedAnswer}</p>
-      <p><strong>Correction type :</strong> {correction.examStyleCorrection}</p>
+      <CorrectionField label="Réponse attendue" value={correction.expectedAnswer} />
+      <CorrectionField label="Correction type" value={correction.examStyleCorrection} />
       {correction.missingKeywords?.length ? (
-        <p><strong>Éléments attendus non cités :</strong> {correction.missingKeywords.join(", ")}</p>
+        <CorrectionList label="Éléments attendus non cités" items={correction.missingKeywords} />
       ) : null}
       {correction.majorErrors?.length ? (
-        <p><strong>Erreurs importantes :</strong> {correction.majorErrors.join(", ")}</p>
+        <CorrectionList label="Erreurs importantes" items={correction.majorErrors} />
       ) : null}
-      <p><strong>Appréciation :</strong> {correction.feedback}</p>
+      <CorrectionField label="Appréciation" value={correction.feedback} />
+    </div>
+  );
+}
+
+function CorrectionField({ label, value }) {
+  return (
+    <div className="correction-field">
+      <strong>{label} :</strong>
+      <CorrectionRichText text={value} />
+    </div>
+  );
+}
+
+function CorrectionList({ label, items }) {
+  return (
+    <div className="correction-field">
+      <strong>{label} :</strong>
+      <ul className="correction-list">
+        {items.map((item, index) => (
+          <li key={`${label}-${index}`}>
+            <CorrectionRichText text={item} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CorrectionRichText({ text }) {
+  const blocks = splitMathParagraphs(text);
+  return (
+    <div className="correction-rich-text">
+      {blocks.map((block, index) => {
+        if (block.type === "math") {
+          return (
+            <div className="formula formula-block" key={index}>
+              {renderFormula(block.text)}
+            </div>
+          );
+        }
+        return <p key={index}><FormattedText text={block.text} /></p>;
+      })}
     </div>
   );
 }
@@ -964,13 +1006,20 @@ function FormattedText({ text }) {
 function renderFormattedText(text) {
   const raw = String(text || "");
   const parts = [];
-  const regex = /\$([^$]+)\$/g;
+  const regex = /(\$\$[\s\S]+?\$\$|\$[^$]+\$)/g;
   let lastIndex = 0;
   let match;
 
   while ((match = regex.exec(raw))) {
     if (match.index > lastIndex) parts.push(renderPlainText(raw.slice(lastIndex, match.index), `t${lastIndex}`));
-    parts.push(<span className="formula" key={`f${match.index}`}>{renderFormula(match[1])}</span>);
+    const token = match[1];
+    const isBlock = token.startsWith("$$");
+    const formula = isBlock ? token.slice(2, -2) : token.slice(1, -1);
+    parts.push(
+      <span className={`formula ${isBlock ? "formula-inline-block" : ""}`} key={`f${match.index}`}>
+        {renderFormula(formula)}
+      </span>,
+    );
     lastIndex = regex.lastIndex;
   }
 
@@ -980,19 +1029,13 @@ function renderFormattedText(text) {
 
 function renderPlainText(text, keyPrefix) {
   return String(text || "")
-    .split(/(\^{[^}]+}|_[{][^}]+[}]|\^[+-]|\d+\^\-?\d+)/g)
+    .split(/(\^{[^}]+}|_\{[^}]+}|\^[+-]|\d+\^\-?\d+)/g)
     .filter((part) => part !== "")
     .map((part, index) => renderFormulaToken(part, `${keyPrefix}-${index}`));
 }
 
 function renderFormula(formula) {
-  const tokens = [];
-  const regex = /(\^{[^}]+}|_\{[^}]+}|_[A-Za-z0-9+\-]+|\^[A-Za-z0-9+\-]+|[A-Za-z]+|\d+|[+\-=(),./])/g;
-  let match;
-  while ((match = regex.exec(formula))) {
-    tokens.push(renderFormulaToken(match[1], `m${match.index}`));
-  }
-  return tokens.length ? tokens : formula;
+  return parseLatexFormula(normalizeLatexFormula(formula));
 }
 
 function renderFormulaToken(token, key) {
@@ -1002,6 +1045,148 @@ function renderFormulaToken(token, key) {
   if (value.startsWith("^")) return <sup key={key}>{value.slice(1)}</sup>;
   if (value.startsWith("_")) return <sub key={key}>{value.slice(1)}</sub>;
   return <span key={key}>{value}</span>;
+}
+
+function splitMathParagraphs(text) {
+  const raw = String(text || "").replace(/\r/g, "");
+  const blocks = [];
+  const regex = /\$\$([\s\S]+?)\$\$/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(raw))) {
+    const before = raw.slice(lastIndex, match.index).trim();
+    if (before) blocks.push(...before.split(/\n{2,}/).map((item) => ({ type: "text", text: item.trim() })).filter((item) => item.text));
+    blocks.push({ type: "math", text: match[1].trim() });
+    lastIndex = regex.lastIndex;
+  }
+
+  const after = raw.slice(lastIndex).trim();
+  if (after) blocks.push(...after.split(/\n{2,}/).map((item) => ({ type: "text", text: item.trim() })).filter((item) => item.text));
+  return blocks.length ? blocks : [{ type: "text", text: raw }];
+}
+
+function normalizeLatexFormula(formula) {
+  return String(formula || "")
+    .replace(/\\left/g, "")
+    .replace(/\\right/g, "")
+    .replace(/\\,/g, " ")
+    .replace(/\\;/g, " ")
+    .replace(/\\!/g, "")
+    .trim();
+}
+
+function parseLatexFormula(formula, keyPrefix = "latex") {
+  const nodes = [];
+  let index = 0;
+
+  while (index < formula.length) {
+    const char = formula[index];
+
+    if (formula.startsWith("\\frac", index)) {
+      const numerator = readLatexGroup(formula, index + 5);
+      const denominator = numerator ? readLatexGroup(formula, numerator.nextIndex) : null;
+      if (numerator && denominator) {
+        nodes.push(
+          <span className="latex-frac" key={`${keyPrefix}-frac-${index}`}>
+            <span className="latex-frac-num">{parseLatexFormula(numerator.content, `${keyPrefix}-n-${index}`)}</span>
+            <span className="latex-frac-den">{parseLatexFormula(denominator.content, `${keyPrefix}-d-${index}`)}</span>
+          </span>,
+        );
+        index = denominator.nextIndex;
+        continue;
+      }
+    }
+
+    if (formula.startsWith("\\text", index) || formula.startsWith("\\mathrm", index)) {
+      const commandLength = formula.startsWith("\\mathrm", index) ? 7 : 5;
+      const group = readLatexGroup(formula, index + commandLength);
+      if (group) {
+        nodes.push(<span key={`${keyPrefix}-text-${index}`}>{parseLatexFormula(group.content, `${keyPrefix}-text-${index}`)}</span>);
+        index = group.nextIndex;
+        continue;
+      }
+    }
+
+    if (char === "{") {
+      const group = readLatexGroup(formula, index);
+      if (group) {
+        if (group.content) {
+          nodes.push(<span key={`${keyPrefix}-group-${index}`}>{parseLatexFormula(group.content, `${keyPrefix}-group-${index}`)}</span>);
+        }
+        index = group.nextIndex;
+        continue;
+      }
+    }
+
+    if (char === "^" || char === "_") {
+      const group = readLatexValue(formula, index + 1);
+      if (group) {
+        const Tag = char === "^" ? "sup" : "sub";
+        nodes.push(<Tag key={`${keyPrefix}-${char}-${index}`}>{parseLatexFormula(group.content, `${keyPrefix}-${char}-${index}`)}</Tag>);
+        index = group.nextIndex;
+        continue;
+      }
+    }
+
+    if (char === "\\") {
+      const command = readLatexCommand(formula, index);
+      nodes.push(<span key={`${keyPrefix}-cmd-${index}`}>{latexCommandLabel(command.name)}</span>);
+      index = command.nextIndex;
+      continue;
+    }
+
+    nodes.push(<span key={`${keyPrefix}-c-${index}`}>{char}</span>);
+    index += 1;
+  }
+
+  return nodes;
+}
+
+function readLatexGroup(formula, startIndex) {
+  let index = startIndex;
+  while (formula[index] === " ") index += 1;
+  if (formula[index] !== "{") return null;
+  let depth = 0;
+  for (let cursor = index; cursor < formula.length; cursor += 1) {
+    if (formula[cursor] === "{") depth += 1;
+    if (formula[cursor] === "}") depth -= 1;
+    if (depth === 0) {
+      return { content: formula.slice(index + 1, cursor), nextIndex: cursor + 1 };
+    }
+  }
+  return null;
+}
+
+function readLatexValue(formula, startIndex) {
+  const group = readLatexGroup(formula, startIndex);
+  if (group) return group;
+  const match = formula.slice(startIndex).match(/^\\?[A-Za-z0-9+\-]+/);
+  if (!match) return null;
+  return { content: match[0], nextIndex: startIndex + match[0].length };
+}
+
+function readLatexCommand(formula, startIndex) {
+  const match = formula.slice(startIndex).match(/^\\[A-Za-z]+/);
+  if (!match) return { name: formula[startIndex], nextIndex: startIndex + 1 };
+  return { name: match[0], nextIndex: startIndex + match[0].length };
+}
+
+function latexCommandLabel(command) {
+  const labels = {
+    "\\lambda": "λ",
+    "\\mu": "μ",
+    "\\Delta": "Δ",
+    "\\alpha": "α",
+    "\\beta": "β",
+    "\\gamma": "γ",
+    "\\times": "×",
+    "\\cdot": "·",
+    "\\ln": "ln",
+    "\\log": "log",
+    "\\pm": "±",
+  };
+  return labels[command] || command.replace(/^\\/, "");
 }
 
 function markdownBlocks(content) {

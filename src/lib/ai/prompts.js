@@ -148,6 +148,12 @@ durées, surveillance et erreurs dangereuses.
 ${referenceInstruction}
 
 Tu ne félicites pas. Tu formules une correction sobre, universitaire et utile.
+Quand une formule, une unité, un isotope ou une équation est nécessaire dans expectedAnswer, feedback ou examStyleCorrection :
+- utilise du LaTeX propre ;
+- encadre les formules courtes avec $...$ et les équations importantes avec $$...$$ ;
+- groupe les isotopes et espèces chimiques dans une seule formule, par exemple \${}^{99m}\\mathrm{TcO_4^-}$ et pas des fragments séparés ;
+- écris les unités en romain, par exemple $\\mathrm{s}^{-1}$, $\\mathrm{g.mol}^{-1}$ ou $\\mathrm{mL}$ ;
+- n'écris jamais des fragments illisibles du type $^{99m}$TcO$_4^-$.
 Retour uniquement en JSON valide, sans markdown.`,
     },
     {
