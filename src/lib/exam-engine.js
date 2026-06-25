@@ -427,9 +427,9 @@ function normalizeCorrection(parsed, question, userAnswer, maxScore) {
 }
 
 function fallbackCorrection(question, userAnswer, maxScore) {
-  const answer = userAnswer.toLowerCase();
+  const answer = normalizeAnswerForLooseMatch(userAnswer);
   const keywords = safeArray(question.keywords);
-  const matchedKeywords = keywords.filter((keyword) => answer.includes(String(keyword).toLowerCase()));
+  const matchedKeywords = keywords.filter((keyword) => answer.includes(normalizeAnswerForLooseMatch(keyword)));
   const missingKeywords = keywords.filter((keyword) => !matchedKeywords.includes(keyword));
   const keywordScore = keywords.length ? (matchedKeywords.length / keywords.length) * maxScore : 0;
   const score = Math.round(keywordScore * 2) / 2;
@@ -452,6 +452,22 @@ function fallbackCorrection(question, userAnswer, maxScore) {
       result: missingKeywords.length ? "failed" : "passed",
     })),
   };
+}
+
+function normalizeAnswerForLooseMatch(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\blamda\b/g, "λ")
+    .replace(/\blambda\b/g, "λ")
+    .replace(/\bdelta\b/g, "δ")
+    .replace(/\bmu\b/g, "μ")
+    .replace(/\bln\s*2\b/g, "ln(2)")
+    .replace(/\bln2\b/g, "ln(2)")
+    .replace(/\bs\s*\^\s*-?\s*1\b/g, "s^-1")
+    .replace(/\bs\s*-\s*1\b/g, "s^-1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeCard(card) {

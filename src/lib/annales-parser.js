@@ -394,7 +394,7 @@ async function fetchMistralOcrText(url) {
       body: JSON.stringify({
         model: "mistral-ocr-latest",
         include_image_base64: true,
-        table_format: "markdown",
+        table_format: null,
         document: {
           type: "document_url",
           document_url: url,
@@ -420,14 +420,15 @@ async function fetchMistralOcrText(url) {
 
   const payload = await response.json();
   const pages = safeArray(payload?.pages)
-    .map((page, index) => cleanText(`PAGE OCR ${index + 1}\n\n${embedOcrImages(page)}`))
+    .map((page, index) => cleanText(`PAGE OCR ${index + 1}\n\n${embedOcrAssets(page)}`))
     .filter(Boolean);
   if (!pages.length) throw new Error("OCR Mistral n'a retourné aucun texte exploitable");
   return pages.join("\n\n");
 }
 
-function embedOcrImages(page) {
+function embedOcrAssets(page) {
   let markdown = String(page?.markdown || "");
+  markdown = embedOcrTables(markdown, page);
   for (const image of safeArray(page?.images)) {
     const id = String(image?.id || image?.image_id || "");
     const base64 = String(image?.image_base64 || "");
@@ -436,6 +437,71 @@ function embedOcrImages(page) {
     markdown = markdown.replaceAll(`](${id})`, `](${dataUrl})`);
   }
   return markdown;
+}
+
+function embedOcrTables(markdown, page) {
+  let output = String(markdown || "");
+  const tables = safeArray(page?.tables);
+  for (const [index, table] of tables.entries()) {
+    const ids = [
+      table?.id,
+      table?.table_id,
+      table?.name,
+      table?.file_name,
+      table?.filename,
+      `tbl-${index}`,
+      `tbl-${index}.md`,
+      `tbl-${index}.html`,
+    ]
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
+    const content = normalizeOcrTableContent(table);
+    if (!ids.length || !content) continue;
+    for (const id of ids) {
+      output = replaceOcrAssetLink(output, id, content);
+    }
+  }
+  return output.replace(/\[tbl-\d+\.(?:md|html)\]\(tbl-\d+\.(?:md|html)\)/gi, "");
+}
+
+function normalizeOcrTableContent(table) {
+  const candidates = [
+    table?.markdown,
+    table?.content,
+    table?.text,
+    table?.html,
+    table?.table,
+  ];
+  const value = candidates.map((candidate) => String(candidate || "").trim()).find(Boolean);
+  if (!value) return "";
+  if (/^\s*</.test(value)) return htmlTableToMarkdown(value);
+  return value;
+}
+
+function replaceOcrAssetLink(markdown, id, replacement) {
+  const escapedId = escapeRegExp(id);
+  return String(markdown || "")
+    .replace(new RegExp(`!\\[[^\\]]*\\]\\(${escapedId}\\)`, "gi"), replacement)
+    .replace(new RegExp(`\\[[^\\]]*\\]\\(${escapedId}\\)`, "gi"), replacement);
+}
+
+function htmlTableToMarkdown(html) {
+  const rows = [...String(html || "").matchAll(/<tr[\s\S]*?<\/tr>/gi)]
+    .map((rowMatch) => [...rowMatch[0].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)]
+      .map((cellMatch) => cleanText(cellMatch[1].replace(/<[^>]+>/g, " "))))
+    .filter((row) => row.length);
+  if (!rows.length) return cleanText(String(html || "").replace(/<[^>]+>/g, " "));
+  const width = Math.max(...rows.map((row) => row.length));
+  const normalizedRows = rows.map((row) => Array.from({ length: width }, (_, index) => row[index] || ""));
+  const header = normalizedRows[0];
+  const separator = header.map(() => "---");
+  return [header, separator, ...normalizedRows.slice(1)]
+    .map((row) => `| ${row.join(" | ")} |`)
+    .join("\n");
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function fetchAnnaleResource(url) {

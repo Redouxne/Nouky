@@ -123,6 +123,7 @@ Exigences :
 
 export function correctionMessages({ statement, biologicalData, question, userAnswer }) {
   const maxScore = question.grading.reduce((sum, item) => sum + Number(item.points || 0), 0);
+  const normalizedUserAnswer = normalizeStudentAnswerForCorrection(userAnswer);
   const isOfficialAnnaleCorrection = question.correctionSource === "official_proposed_answer";
   const referenceLabel = isOfficialAnnaleCorrection
     ? "Correction proposée officielle de l'annale"
@@ -146,6 +147,14 @@ Tu sanctions les réponses vagues, les diagnostics non justifiés, l'absence de 
 durées, surveillance et erreurs dangereuses.
 
 ${referenceInstruction}
+
+Avant de noter, interprète les notations étudiant avec tolérance raisonnable :
+- accepte les variantes typographiques ou fautes évidentes si le sens scientifique est clair ;
+- considère par exemple "lamda", "lambda" et "λ" comme équivalents ;
+- considère "ln2/T", "ln(2)/T", "ln 2 / T" et "$\\frac{\\ln 2}{T}$" comme équivalents ;
+- accepte les écritures équivalentes d'unités et puissances, par exemple "s-1", "s^-1" et "$\\mathrm{s}^{-1}$" ;
+- ne retire pas de point pour une notation imparfaite si la grandeur, la relation et le raisonnement sont justes ;
+- sanctionne seulement si l'ambiguïté change le sens, l'unité, le résultat numérique ou le raisonnement.
 
 Tu ne félicites pas. Tu formules une correction sobre, universitaire et utile.
 Quand une formule, une unité, un isotope ou une équation est nécessaire dans expectedAnswer, feedback ou examStyleCorrection :
@@ -186,6 +195,9 @@ ${JSON.stringify(question.commonMistakes)}
 Réponse utilisateur :
 ${userAnswer}
 
+Lecture normalisée de la réponse utilisateur, à utiliser uniquement pour reconnaître les équivalences de notation :
+${normalizedUserAnswer}
+
 Retourne strictement :
 {
   "score": 0,
@@ -203,6 +215,23 @@ Retourne strictement :
 }`,
     },
   ];
+}
+
+function normalizeStudentAnswerForCorrection(answer) {
+  return String(answer || "")
+    .normalize("NFKC")
+    .replace(/\blamda\b/gi, "λ")
+    .replace(/\blambda\b/gi, "λ")
+    .replace(/\bdelta\b/gi, "Δ")
+    .replace(/\bmu\b/gi, "μ")
+    .replace(/\bln\s*2\b/gi, "ln(2)")
+    .replace(/\bln2\b/gi, "ln(2)")
+    .replace(/\bs\s*\^\s*-?\s*1\b/gi, "s^-1")
+    .replace(/\bs\s*-\s*1\b/gi, "s^-1")
+    .replace(/\s*=\s*/g, " = ")
+    .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function leitnerCardMessages({ title, question, correction }) {
