@@ -1705,7 +1705,7 @@ function AnnalePdfRunner(props) {
   const currentCorrection = selectedSection ? corrections[selectedSection.id] : null;
   const sectionDuration = currentCorrection?.durationSeconds ?? elapsedSeconds(questionStartedAtMs, nowMs);
   const draft = selectedSection ? sectionDrafts[selectedSection.id] || "" : "";
-  const pdfSrc = selectedSection ? buildPdfSource(activeAnnale.url, selectedSection.sourcePage) : activeAnnale.url;
+  const pdfSrc = buildPdfSource(activeAnnale, selectedSection?.sourcePage);
 
   function updateDraft(value) {
     if (!selectedSection) return;
@@ -1812,7 +1812,8 @@ function getAnnaleSections(questions = []) {
   return [...sections.values()];
 }
 
-function buildPdfSource(url, page) {
+function buildPdfSource(annale, page) {
+  const url = `/api/annales/pdf?annaleId=${encodeURIComponent(annale.id)}`;
   const pageNumber = Number(page || 0);
   if (!pageNumber) return url;
   return `${url}#page=${pageNumber}`;
