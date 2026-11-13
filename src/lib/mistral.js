@@ -13,6 +13,9 @@ export async function mistralChat(messages, options = {}) {
     throw new Error(`${provider.key} manquante`);
   }
 
+  const model = process.env.AI_MODEL || (providerName === "mistral" ? process.env.MISTRAL_MODEL : "") || provider.model;
+  const supportsStrictSchema = providerName === "groq" && ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"].includes(model);
+
   const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -21,14 +24,16 @@ export async function mistralChat(messages, options = {}) {
       "User-Agent": "Nouky/1.0",
     },
     body: JSON.stringify({
-      model: process.env.AI_MODEL || (providerName === "mistral" ? process.env.MISTRAL_MODEL : "") || provider.model,
+      model,
       messages,
       temperature: options.temperature ?? 0.5,
       top_p: options.topP ?? 0.9,
       ...(providerName === "groq" ? {
         max_completion_tokens: options.maxCompletionTokens ?? 8192,
         reasoning_effort: "low",
-        response_format: { type: "json_object" },
+        response_format: supportsStrictSchema && options.responseSchema
+          ? { type: "json_schema", json_schema: options.responseSchema }
+          : { type: "json_object" },
       } : {}),
     }),
     cache: "no-store",
@@ -39,10 +44,12 @@ export async function mistralChat(messages, options = {}) {
     const details = await response.text();
     let providerMessage = details;
     try {
-      providerMessage = JSON.parse(details)?.message || details;
+      const parsed = JSON.parse(details);
+      providerMessage = parsed?.error?.message || parsed?.message || details;
     } catch {
       providerMessage = details;
     }
+    providerMessage = String(providerMessage).slice(0, 300);
 
     const error = new Error(
       response.status === 429

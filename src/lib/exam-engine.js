@@ -1,5 +1,6 @@
 import { extractJsonObject, clampScore, safeArray } from "@/lib/ai/json";
 import { caseGeneratorMessages, correctionMessages, leitnerCardMessages, qcmGeneratorMessages } from "@/lib/ai/prompts";
+import { qcmResponseSchema } from "@/lib/ai/schemas";
 import { getProgramSubject, getSkillLabel } from "@/lib/internat-program";
 import { mistralChat } from "@/lib/mistral";
 import qcmBank from "@/data/annales-qcm.json";
@@ -146,6 +147,7 @@ export async function generateQcmContent({ subjectId, count = 10 }) {
     const raw = await mistralChat(qcmGeneratorMessages({ subject, skills, count: normalizedCount }), {
       temperature: 0.45,
       topP: 0.88,
+      responseSchema: qcmResponseSchema,
     });
     return normalizeQcmSet(extractJsonObject(raw), { subject, subjectId, difficulty, count: normalizedCount });
   } catch (error) {
