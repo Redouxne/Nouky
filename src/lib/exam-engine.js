@@ -138,7 +138,7 @@ export async function generateQcmContent({ subjectId, count = 10 }) {
   }
   const subject = getProgramSubject(subjectId);
   const difficulty = "concours";
-  const normalizedCount = Math.min(Math.max(Number(count) || 10, 5), 20);
+  const normalizedCount = Math.min(Math.max(Number(count) || 5, 5), 5);
   const skills = Object.entries(subject.skills)
     .map(([id, label]) => `${subjectId}.${id}: ${label}`)
     .join("\n");
