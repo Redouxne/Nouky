@@ -1436,3 +1436,11 @@ textarea:focus {
     font-size: 2.25rem;
   }
 }
+.qcm-figure {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  margin: 0.75rem 0 1.25rem;
+  background: white;
+}

@@ -1,62 +1,32 @@
 # Nouky
 
-Nouky est une plateforme Next.js de préparation aux dossiers thérapeutiques et biologiques de l'internat de pharmacie.
+Préparation locale à l'internat de pharmacie avec annales, QCM et suivi de progression.
 
-Le modèle Mistral est appelé uniquement depuis les routes serveur. La clé API doit rester dans `.env.local` en local ou dans les variables d'environnement Vercel.
-
-## Local
+## Démarrage local
 
 ```bash
 npm install
-cp -n .env.example .env
-cp -n .env.example .env.local
-npx prisma db push
-npm run dev
+cp .env.example .env
+# Pour un usage local sans PostgreSQL, remplacer DATABASE_URL par file:./dev.db.
+# Remplacer NEXTAUTH_SECRET par une valeur aléatoire longue.
+npm run db:local
+npm run dev:local
 ```
 
-Renseigner `DATABASE_URL`, `DATABASE_URL_UNPOOLED` et `MISTRAL_API_KEY` dans `.env.local`, puis ouvrir `http://127.0.0.1:3000`.
+Ouvrir http://localhost:3000 et créer un compte. La base SQLite locale est créée dans `prisma/dev.db`. Les 132 sources MedShake publiques (44 sessions de 1991 à 2026, dossiers, exercices et QCM) sont conservées dans `data/annales/` et ne sont pas poussées sur GitHub. Le fichier `src/data/annales-qcm.json` contient 2 632 QCM à grille vérifiée. Huit questions sans bonne réponse exploitable sont exclues du mode quiz. Le script d'import garde les URL, tailles et empreintes SHA-256 dans `data/annales/manifest.json`.
 
-## Variables
+Pour actualiser le corpus : installer `lxml` avec `python3 -m pip install lxml`, puis lancer `python3 scripts/import-annales.py` et `python3 scripts/build-qcm-bank.py`.
+
+Les séries « Annales mélangées » et les annales QCM fonctionnent sans API IA. Les PDF scannés sont consultables localement et peuvent être marqués comme terminés. Une correction automatique fiable des dossiers et exercices demande une transcription OCR et un corrigé vérifié ; Nouky n'invente pas de note pour ces sujets.
+
+## IA facultative
+
+Pour les séries par matière, dossiers générés et corrections libres, renseigner une clé dans `.env` et choisir `AI_PROVIDER=groq`, `mistral` ou `deepseek`. La clé reste côté serveur. Le fournisseur Groq est configuré par défaut avec `openai/gpt-oss-120b`. Les appels sans clé retournent une erreur explicite ; les quiz d'annales restent disponibles.
 
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
-DATABASE_URL_UNPOOLED="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"
-MISTRAL_API_KEY=""
-MISTRAL_MODEL="mistral-large-latest"
-NEXTAUTH_SECRET="change-me"
+AI_PROVIDER="groq"
+GROQ_API_KEY="..."
+AI_MODEL="openai/gpt-oss-120b"
 ```
 
-## Fonctionnalités
-
-- Dossiers progressifs concours par matière et difficulté.
-- Correction immédiate avec barème, mots-clés, oublis et erreurs graves.
-- Cartes de révision Leitner générées depuis les erreurs.
-- Progression par score, matière faible et compétence faible.
-- Concours blanc de 3 à 5 dossiers.
-
-## Routes principales
-
-- `POST /api/cases/generate`
-- `POST /api/cases/answer`
-- `GET /api/leitner/due`
-- `POST /api/leitner/review`
-- `GET /api/progress`
-- `POST /api/mock-exam/generate`
-
-## Vercel
-
-Déployer comme projet Next.js standard. Ajouter au minimum `MISTRAL_API_KEY`, `MISTRAL_MODEL`, `NEXTAUTH_SECRET`, `DATABASE_URL` et `DATABASE_URL_UNPOOLED` dans les variables d'environnement du projet.
-
-La base doit être PostgreSQL pour une vraie persistance sur Vercel. Une base Neon, Supabase, Vercel Postgres ou tout Postgres managé compatible Prisma convient.
-
-Après avoir configuré `DATABASE_URL` et `DATABASE_URL_UNPOOLED`, appliquer le schéma :
-
-```bash
-npx prisma db push
-```
-
-
-
-## TO DO 
-
-internat-program.js a modifié
+Sur Vercel, Nouky utilise PostgreSQL avec `prisma/schema.prisma` et les variables `DATABASE_URL` et `DATABASE_URL_UNPOOLED`. Les PDF sont lus depuis la copie locale si elle existe et depuis MedShake sinon. La génération du client Prisma utilise le schéma PostgreSQL lors de `npm run build`.

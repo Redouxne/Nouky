@@ -11,6 +11,8 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
+    "db:local": "prisma db push --schema prisma/sqlite.prisma",
+    "dev:local": "prisma generate --schema prisma/sqlite.prisma && next dev",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"

@@ -16,6 +16,13 @@ export async function POST(request) {
     const annale = getAnnaleById(annaleId);
     if (!annale) return Response.json({ error: "Annale introuvable" }, { status: 404 });
 
+    if (annale.format === "PDF") {
+      return Response.json({
+        annale,
+        annaleSession: { title: annale.label, subject: "Sujet original", questions: [], pdfOnly: true },
+      });
+    }
+
     const parsed = await parseAnnale(annale);
     const caseSession = await prisma.caseSession.create({
       data: {

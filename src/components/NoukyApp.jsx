@@ -9,7 +9,7 @@ const DIFFICULTIES = ["facile", "intermédiaire", "difficile"];
 const QCM_PROGRAM_OPTIONS = getProgramsByExamType("qcm");
 const CASE_PROGRAM_OPTIONS = getProgramsByExamType("dossier_clinique");
 const DEFAULT_CLINICAL_SUBJECT = "sciences_medicament_pharmacologie_generale";
-const DEFAULT_QCM_SUBJECT = QCM_PROGRAM_OPTIONS[0]?.id || DEFAULT_CLINICAL_SUBJECT;
+const DEFAULT_QCM_SUBJECT = "annales";
 const MASTERY_LABELS = {
   tres_bien_maitrise: "Très bien maîtrisé",
   maitrise: "Maîtrisé",
@@ -593,6 +593,7 @@ export default function NoukyApp({ user }) {
           currentSectionId={currentAnnaleSectionId}
           error={error}
           loadAnnale={loadAnnale}
+          markAnnaleDone={(annaleId) => updateAnnaleProgress(annaleId, { status: "done" })}
           loading={loading}
           loadingAnnaleId={loadingAnnaleId}
           nowMs={nowMs}
@@ -662,7 +663,7 @@ function CasesTab(props) {
       <div className="control-grid">
         <label>
           Matière
-          <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+          <select value={subjectId} onChange={(event) => { setSubjectId(event.target.value); if (event.target.value !== "annales") setQcmCount(5); }}>
             {subjectOptions.map((option) => (
               <option key={option.id} value={option.id}>{option.label}</option>
             ))}
@@ -801,15 +802,16 @@ function QcmTab(props) {
         <label>
           Matière
           <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+            <option value="annales">Annales mélangées · sans IA</option>
             {QCM_PROGRAM_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
+              <option key={option.id} value={option.id}>{option.label} · IA</option>
             ))}
           </select>
         </label>
         <label>
           Nombre
           <select value={qcmCount} onChange={(event) => setQcmCount(Number(event.target.value))}>
-            {[5, 10, 15, 20].map((item) => <option key={item} value={item}>{item}</option>)}
+            {(subjectId === "annales" ? [5, 10, 15, 20] : [5]).map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </label>
         <button className="secondary-button" onClick={generateQcm} disabled={loading === "qcm"}>
@@ -818,7 +820,7 @@ function QcmTab(props) {
       </div>
 
       {!qcmSession ? (
-        <div className="empty-state">Sélectionne une matière puis génère une série de QCM.</div>
+        <div className="empty-state">Lance une série de QCM tirés des annales corrigées, sans clé API. Les séries par matière utilisent l’IA.</div>
       ) : (
         <div className="case-layout">
           <article className="panel qcm-document">
@@ -857,6 +859,8 @@ function QcmTab(props) {
             {currentQuestion ? (
               <form className="qcm-form" onSubmit={submitAnswer}>
                 <p className="qcm-stem">{currentQuestion.text}</p>
+                {currentQuestion.imageUrl ? <img className="qcm-figure" src={currentQuestion.imageUrl} alt={`Figure de la question ${currentQuestionIndex + 1}`} /> : null}
+                {currentQuestion.sourceUrl ? <a href={currentQuestion.sourceUrl} target="_blank" rel="noreferrer">Voir la question source</a> : null}
                 <div className="option-list">
                   {currentQuestion.options.map((option) => (
                     <label
@@ -1364,6 +1368,7 @@ function AnnalesTab(props) {
     currentSectionId,
     error,
     loadAnnale,
+    markAnnaleDone,
     loading,
     loadingAnnaleId,
     nowMs,
@@ -1389,6 +1394,25 @@ function AnnalesTab(props) {
   const stats = getAnnaleStats(progress);
 
   if (annaleSession && activeAnnale) {
+    if (annaleSession.pdfOnly) {
+      const pdfSrc = buildPdfSource(activeAnnale);
+      return (
+        <section className="tab-panel">
+          <div className="section-header">
+            <div><h2>{activeAnnale.label}</h2><p>Sujet original conservé en local.</p></div>
+            <button className="secondary-button" onClick={closeAnnaleSession} type="button">Retour aux annales</button>
+          </div>
+          <div className="panel pdf-annale-document">
+            <div className="pdf-viewer-shell"><iframe className="pdf-viewer" src={pdfSrc} title={activeAnnale.label} /></div>
+            <div className="pdf-source-row">
+              <a className="secondary-button small" href={pdfSrc} target="_blank" rel="noreferrer">Ouvrir le PDF</a>
+              <button className="primary-button" onClick={() => { markAnnaleDone(activeAnnale.id); closeAnnaleSession(); }} type="button">Marquer comme terminé</button>
+            </div>
+            <p>Ce sujet scanné est consultable hors ligne. La correction automatique nécessite une transcription et une grille vérifiées.</p>
+          </div>
+        </section>
+      );
+    }
     return (
       <AnnaleRunner
         activeAnnale={activeAnnale}
@@ -1499,8 +1523,8 @@ function AnnalesTab(props) {
                 >
                   {isLoadingThisAnnale ? "Préparation..." : "Démarrer"}
                 </button>
-                <a className="secondary-button" href={annale.url} rel="noreferrer" target="_blank">
-                  Source
+                <a className="secondary-button" href={annale.format === "PDF" ? buildPdfSource(annale) : annale.url} rel="noreferrer" target="_blank">
+                  {annale.format === "PDF" ? "PDF local" : "Source"}
                 </a>
               </div>
             </article>
@@ -1627,6 +1651,7 @@ function AnnaleRunner(props) {
               <div className="qcm-stem">
                 <MarkdownLite content={currentQuestion.text} />
               </div>
+              {currentQuestion.imageUrl ? <img className="qcm-figure" src={currentQuestion.imageUrl} alt={`Figure de la question ${currentQuestionIndex + 1}`} /> : null}
               {isQcm ? (
                 <div className="option-list">
                   {currentQuestion.options.map((option) => (

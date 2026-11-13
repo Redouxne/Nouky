@@ -1,5 +1,7 @@
 import { getAnnaleById } from "@/lib/annales";
 import { getSession } from "@/lib/session";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,19 +19,19 @@ export async function GET(request) {
   }
 
   try {
-    const upstream = await fetch(annale.url, {
-      cache: "no-store",
-      headers: {
-        "User-Agent": "Nouky/1.0",
-      },
-      signal: AbortSignal.timeout(20000),
-    });
-
-    if (!upstream.ok) {
-      return Response.json({ error: `PDF indisponible (${upstream.status})` }, { status: 502 });
+    let body;
+    try {
+      body = await readFile(path.join(process.cwd(), "data", "annales", `${annale.id}.pdf`));
+    } catch {
+      const upstream = await fetch(annale.url, {
+        headers: { "User-Agent": "Nouky/1.0" },
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!upstream.ok || !upstream.headers.get("content-type")?.includes("pdf")) {
+        return Response.json({ error: "PDF source indisponible" }, { status: 502 });
+      }
+      body = await upstream.arrayBuffer();
     }
-
-    const body = await upstream.arrayBuffer();
     return new Response(body, {
       headers: {
         "Cache-Control": "private, max-age=1800",
@@ -38,6 +40,6 @@ export async function GET(request) {
       },
     });
   } catch {
-    return Response.json({ error: "MedShake est inaccessible pour ce PDF" }, { status: 502 });
+    return Response.json({ error: "PDF indisponible pour le moment" }, { status: 502 });
   }
 }

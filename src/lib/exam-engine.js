@@ -2,6 +2,7 @@ import { extractJsonObject, clampScore, safeArray } from "@/lib/ai/json";
 import { caseGeneratorMessages, correctionMessages, leitnerCardMessages, qcmGeneratorMessages } from "@/lib/ai/prompts";
 import { getProgramSubject, getSkillLabel } from "@/lib/internat-program";
 import { mistralChat } from "@/lib/mistral";
+import qcmBank from "@/data/annales-qcm.json";
 
 const LEITNER_MAX_BOX = 10;
 const LEITNER_MAX_INTERVAL_DAYS = 60;
@@ -78,10 +79,12 @@ export function publicCasePayload(caseSession) {
       id: question.id,
       type: question.type || "case",
       text: question.text,
+      imageUrl: question.imageUrl || "",
       sectionId: question.sectionId || "",
       sectionTitle: question.sectionTitle || "",
       sectionStatement: question.sectionStatement || "",
       correctionSource: question.correctionSource || "",
+      sourceUrl: question.sourceUrl || "",
       sourcePage: Number(question.sourcePage || 0),
       options: safeArray(question.options).map((option) => ({
         id: String(option.id),
@@ -110,11 +113,28 @@ export async function generateCaseContent({ subjectId, difficulty = "intermédia
     });
     return normalizeCase(extractJsonObject(raw), { subject, subjectId, difficulty });
   } catch (error) {
-    return fallbackCase({ subject, subjectId, difficulty });
+    throw new Error(`Génération du dossier indisponible : ${error.message}`);
   }
 }
 
 export async function generateQcmContent({ subjectId, count = 10 }) {
+  if (subjectId === "annales") {
+    const normalizedCount = Math.min(Math.max(Number(count) || 10, 5), 20);
+    const questions = Object.values(qcmBank).flat();
+    for (let index = questions.length - 1; index > 0; index -= 1) {
+      const selected = Math.floor(Math.random() * (index + 1));
+      [questions[index], questions[selected]] = [questions[selected], questions[index]];
+    }
+    return {
+      title: "QCM d'annales mélangés",
+      subject: "Annales de l'internat",
+      difficulty: "annale",
+      hiddenDiagnosis: "",
+      statement: `${normalizedCount} QCM issus des annales MedShake, avec leur grille officielle.`,
+      biologicalData: [],
+      questions: questions.slice(0, normalizedCount),
+    };
+  }
   const subject = getProgramSubject(subjectId);
   const difficulty = "concours";
   const normalizedCount = Math.min(Math.max(Number(count) || 10, 5), 20);
@@ -129,7 +149,7 @@ export async function generateQcmContent({ subjectId, count = 10 }) {
     });
     return normalizeQcmSet(extractJsonObject(raw), { subject, subjectId, difficulty, count: normalizedCount });
   } catch (error) {
-    return fallbackQcmSet({ subject, subjectId, difficulty, count: normalizedCount });
+    throw new Error(`Génération IA indisponible : ${error.message}. Choisis « Annales mélangées » pour t'entraîner sans clé API.`);
   }
 }
 
@@ -153,7 +173,7 @@ export async function correctAnswer({ caseSession, question, userAnswer }) {
     );
     return normalizeCorrection(extractJsonObject(raw), question, userAnswer, maxScore);
   } catch (error) {
-    return fallbackCorrection(question, userAnswer, maxScore);
+    throw new Error(`Correction IA indisponible : ${error.message}`);
   }
 }
 
@@ -309,7 +329,7 @@ function buildCaseItemBack({ question, correction, skillLabel }) {
 
 function normalizeCase(parsed, { subject, subjectId, difficulty }) {
   if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length < 3) {
-    return fallbackCase({ subject, subjectId, difficulty });
+    throw new Error("Le modèle n'a pas retourné de dossier exploitable");
   }
 
   const questions = parsed.questions.slice(0, 6).map((question, index) => {
@@ -348,7 +368,7 @@ function normalizeCase(parsed, { subject, subjectId, difficulty }) {
 
 function normalizeQcmSet(parsed, { subject, subjectId, difficulty, count }) {
   if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length < 1) {
-    return fallbackQcmSet({ subject, subjectId, difficulty, count });
+    throw new Error("Le modèle n'a retourné aucun QCM exploitable");
   }
 
   const skillIds = Object.keys(subject.skills);
@@ -357,8 +377,7 @@ function normalizeQcmSet(parsed, { subject, subjectId, difficulty, count }) {
   );
 
   if (questions.length < count) {
-    const fallback = fallbackQcmSet({ subject, subjectId, difficulty, count });
-    questions.push(...fallback.questions.slice(questions.length, count));
+    throw new Error(`Le modèle n'a retourné que ${questions.length} QCM sur ${count} demandés`);
   }
 
   return {
@@ -405,7 +424,7 @@ function normalizeQcmQuestion(question, { subjectId, skillIds, index }) {
 }
 
 function normalizeCorrection(parsed, question, userAnswer, maxScore) {
-  if (!parsed) return fallbackCorrection(question, userAnswer, maxScore);
+  if (!parsed) throw new Error("Le modèle n'a pas retourné de correction exploitable");
   const score = clampScore(parsed.score, parsed.maxScore || maxScore);
   const normalizedMax = Number(parsed.maxScore || maxScore);
   const computedStatus = score >= normalizedMax * 0.8 ? "correct" : score > 0 ? "partiel" : "incorrect";

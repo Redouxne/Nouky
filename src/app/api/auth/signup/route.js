@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { hashPassword, validateEmail, validatePassword } from "@/lib/auth";
 import { cookies } from "next/headers";
+import { createSessionCookie } from "@/lib/session";
 
 export async function POST(request) {
   try {
@@ -40,7 +41,7 @@ export async function POST(request) {
     });
 
     const cookieStore = await cookies();
-    cookieStore.set("userId", user.id, {
+    cookieStore.set("userId", createSessionCookie(user.id), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",

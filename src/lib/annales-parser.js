@@ -1,10 +1,25 @@
 import { inflateSync } from "zlib";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { safeArray } from "@/lib/ai/json";
+import qcmBank from "@/data/annales-qcm.json";
 
 const OPTION_IDS = ["A", "B", "C", "D", "E"];
 
 export async function parseAnnale(annale) {
-  if (annale.type === "qcm") return parseQcmAnnale(annale);
+  if (annale.type === "qcm") {
+    const questions = qcmBank[annale.sessionId] || [];
+    if (!questions.length) throw new Error("Aucun QCM corrigé disponible pour cette session");
+    return {
+      title: annale.label,
+      subject: `Annales - ${annale.typeLabel}`,
+      difficulty: "annale",
+      hiddenDiagnosis: "",
+      statement: `Annale ${annale.sessionLabel} - ${annale.typeLabel}. Source : MedShake. ${questions.length} questions corrigées.`,
+      biologicalData: [],
+      questions,
+    };
+  }
   return parsePdfAnnale(annale);
 }
 
@@ -83,7 +98,7 @@ async function parsePdfAnnale(annale) {
   let extractionSource = "pdf";
 
   try {
-    const pdfBuffer = Buffer.from(await fetchArrayBuffer(annale.url));
+    const pdfBuffer = await readFile(path.join(process.cwd(), "data", "annales", `${annale.id}.pdf`));
     text = extractPdfText(pdfBuffer);
   } catch {
     text = "";

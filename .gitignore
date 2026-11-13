@@ -12,6 +12,7 @@ build
 dev.db
 prisma/dev.db
 .vercel
+data/annales/
 prisma/migrations
 .env*
 !.env.example
