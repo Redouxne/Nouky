@@ -48,7 +48,7 @@ export default function AuthForm({ mode = "signin" }) {
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell auth-shell">
       <header className="topbar">
         <div className="brand">
           <img className="brand-logo" src="/Leoard.png" alt="Nouky" />
@@ -56,7 +56,7 @@ export default function AuthForm({ mode = "signin" }) {
         </div>
       </header>
 
-      <section className="start-view">
+      <section className="start-view auth-view">
         <div className="start-content" style={{ maxWidth: "400px" }}>
           <div className="eyebrow">{isSignup ? "Créer un compte" : "Se connecter"}</div>
           <h1 className="start-title" style={{ fontSize: "2rem" }}>

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ANNALE_CATALOG, ANNALE_TYPE_OPTIONS, ANNALE_YEAR_OPTIONS } from "@/lib/annales";
 import { getProgramsByExamType } from "@/lib/internat-program";
+import SunprintArtwork from "@/components/SunprintArtwork";
+import NoukyRunningLoader from "@/components/NoukyRunningLoader";
 
 const DIFFICULTIES = ["facile", "intermédiaire", "difficile"];
 const QCM_PROGRAM_OPTIONS = getProgramsByExamType("qcm");
@@ -55,6 +57,13 @@ function formatDuration(totalSeconds) {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function qcmOptionResult(correction, optionId) {
+  if (!correction) return "";
+  if (correction.correctOptionIds?.includes(optionId)) return "correct";
+  if (correction.selectedOptionIds?.includes(optionId)) return "incorrect-selected";
+  return "";
 }
 
 function elapsedSeconds(startedAtMs, nowMs = Date.now()) {
@@ -509,10 +518,11 @@ export default function NoukyApp({ user }) {
 
       <section className="hero-panel">
         <div>
-          <div className="eyebrow">Préparation concours</div>
-          <h1>Dossiers thérapeutiques et biologiques</h1>
-          <p>Dashboard, annales, QCM et dossiers pour l'internat de pharmacie.</p>
+          <div className="eyebrow">Ton atelier · Préparation concours</div>
+          <h1>Chaque séance te fait <em>avancer.</em></h1>
+          <p>Annales, QCM et dossiers pour préparer l’internat de pharmacie avec méthode.</p>
         </div>
+        <SunprintArtwork compact />
       </section>
 
       <nav className="tabs" aria-label="Navigation principale">
@@ -801,7 +811,10 @@ function QcmTab(props) {
       <div className="qcm-setup-bar">
         <label>
           Matière
-          <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+          <select value={subjectId} onChange={(event) => {
+            setSubjectId(event.target.value);
+            if (event.target.value !== "annales") setQcmCount(5);
+          }} disabled={loading === "qcm"}>
             <option value="annales">Annales mélangées · sans IA</option>
             {QCM_PROGRAM_OPTIONS.map((option) => (
               <option key={option.id} value={option.id}>{option.label} · IA</option>
@@ -810,7 +823,7 @@ function QcmTab(props) {
         </label>
         <label>
           Nombre
-          <select value={qcmCount} onChange={(event) => setQcmCount(Number(event.target.value))}>
+          <select value={qcmCount} onChange={(event) => setQcmCount(Number(event.target.value))} disabled={loading === "qcm"}>
             {(subjectId === "annales" ? [5, 10, 15, 20] : [5]).map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </label>
@@ -819,7 +832,9 @@ function QcmTab(props) {
         </button>
       </div>
 
-      {!qcmSession ? (
+      {loading === "qcm" && subjectId !== "annales" ? (
+        <NoukyRunningLoader />
+      ) : !qcmSession ? (
         <div className="empty-state">Lance une série de QCM tirés des annales corrigées, sans clé API. Les séries par matière utilisent l’IA.</div>
       ) : (
         <div className="case-layout">
@@ -864,7 +879,7 @@ function QcmTab(props) {
                 <div className="option-list">
                   {currentQuestion.options.map((option) => (
                     <label
-                      className={`option-row ${selected.includes(option.id) ? "selected" : ""}`}
+                      className={`option-row ${selected.includes(option.id) ? "selected" : ""} ${qcmOptionResult(currentCorrection, option.id)}`}
                       key={option.id}
                     >
                       <input
@@ -875,6 +890,11 @@ function QcmTab(props) {
                       />
                       <span className="option-letter">{option.id}</span>
                       <span>{option.text}</span>
+                      {currentCorrection && qcmOptionResult(currentCorrection, option.id) ? (
+                        <span className="visually-hidden">
+                          {qcmOptionResult(currentCorrection, option.id) === "correct" ? "Bonne réponse" : "Réponse cochée incorrecte"}
+                        </span>
+                      ) : null}
                     </label>
                   ))}
                 </div>
@@ -897,32 +917,10 @@ function QcmTab(props) {
               </form>
             ) : null}
 
-            {currentCorrection ? <QcmCorrectionBlock correction={currentCorrection} /> : null}
           </aside>
         </div>
       )}
     </section>
-  );
-}
-
-function QcmCorrectionBlock({ correction }) {
-  return (
-    <div className="correction-block">
-      <div className={`status ${correction.status}`}>{correction.status}</div>
-      <h3>Correction QCM</h3>
-      <p><strong>Score :</strong> {formatScore(correction.score, correction.maxScore)}</p>
-      {correction.durationSeconds ? (
-        <p><strong>Temps :</strong> {formatDuration(correction.durationSeconds)}</p>
-      ) : null}
-      <CorrectionField label="Réponse donnée" value={correction.selectedOptionIds?.join(", ") || "Aucune"} />
-      <CorrectionField label="Correction" value={getUnifiedCorrectionText(correction)} />
-      {correction.majorErrors?.length ? (
-        <CorrectionList label="Propositions fausses cochées" items={correction.majorErrors} />
-      ) : null}
-      {correction.missingKeywords?.length ? (
-        <CorrectionList label="Propositions exactes oubliées" items={correction.missingKeywords} />
-      ) : null}
-    </div>
   );
 }
 
@@ -1656,7 +1654,7 @@ function AnnaleRunner(props) {
                 <div className="option-list">
                   {currentQuestion.options.map((option) => (
                     <label
-                      className={`option-row ${selected.includes(option.id) ? "selected" : ""}`}
+                      className={`option-row ${selected.includes(option.id) ? "selected" : ""} ${qcmOptionResult(currentCorrection, option.id)}`}
                       key={option.id}
                     >
                       <input
@@ -1667,6 +1665,11 @@ function AnnaleRunner(props) {
                       />
                       <span className="option-letter">{option.id}</span>
                       <span>{option.text}</span>
+                      {currentCorrection && qcmOptionResult(currentCorrection, option.id) ? (
+                        <span className="visually-hidden">
+                          {qcmOptionResult(currentCorrection, option.id) === "correct" ? "Bonne réponse" : "Réponse cochée incorrecte"}
+                        </span>
+                      ) : null}
                     </label>
                   ))}
                 </div>
@@ -1701,7 +1704,7 @@ function AnnaleRunner(props) {
             </form>
           ) : null}
 
-          {currentCorrection ? <CorrectionBlock correction={currentCorrection} /> : null}
+          {currentCorrection && !isQcm ? <CorrectionBlock correction={currentCorrection} /> : null}
         </aside>
       </div>
     </section>
@@ -2055,10 +2058,10 @@ function ProgressPieCard({ onSelectStatus, subject }) {
 
 function buildPieStyle(counts, total) {
   const colors = {
-    tres_bien_maitrise: "#0f7a4f",
-    maitrise: "#2563eb",
-    a_revoir: "#d97706",
-    jamais_vu: "#cbd5e1",
+    tres_bien_maitrise: "#315f4c",
+    maitrise: "#83ad8f",
+    a_revoir: "#bc8064",
+    jamais_vu: "#c7d4c5",
   };
   if (!total) return { background: colors.jamais_vu };
   let cursor = 0;

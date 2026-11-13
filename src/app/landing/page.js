@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import SunprintArtwork from "@/components/SunprintArtwork";
 
 export default function LandingPage() {
   return (
-    <main className="app-shell">
+    <main className="app-shell landing-shell">
       <header className="topbar">
         <div className="brand">
           <img className="brand-logo" src="/Leoard.png" alt="Nouky" />
@@ -12,35 +13,25 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <section className="start-view">
+      <section className="start-view landing-view">
         <div className="start-content">
-          <div className="eyebrow">Internat pharmacie</div>
-          <h1 className="start-title">Dossiers thérapeutiques et biologiques</h1>
+          <div className="eyebrow">L’atelier de révision · Internat pharmacie</div>
+          <h1 className="start-title">La révision prend <em>forme.</em></h1>
           <p className="start-subtitle">
-            Nouky centralise les annales, les QCM et les dossiers, puis suit la progression par matière.
+            Annales, QCM et dossiers thérapeutiques réunis dans un espace clair pour avancer à ton rythme vers le concours.
           </p>
-
-          <div style={{ marginBottom: "32px" }}>
-            <h2 style={{ fontSize: "1.25rem", marginBottom: "16px", color: "var(--ink)" }}>
-              Pourquoi Nouky ?
-            </h2>
-            <ul style={{ color: "var(--muted)", lineHeight: "1.8", maxWidth: "600px" }}>
-              <li>Dossiers proches concours générés par IA</li>
-              <li>Correction immédiate avec mots-clés et points</li>
-              <li>Révisions priorisées à partir des erreurs</li>
-              <li>Progression suivie par matière et compétence</li>
-            </ul>
-          </div>
-
           <div className="start-actions">
-            <Link href="/auth/signin">
-              <button className="primary-button">Se connecter</button>
-            </Link>
-            <Link href="/auth/signup">
-              <button className="secondary-button">Créer un compte</button>
-            </Link>
+            <Link className="primary-button" href="/auth/signup">Commencer à réviser <span aria-hidden="true">↗</span></Link>
+            <Link className="secondary-button" href="/auth/signin">Se connecter</Link>
           </div>
+          <div className="landing-note">Un parcours simple, des progrès visibles, séance après séance.</div>
         </div>
+        <SunprintArtwork />
+      </section>
+      <section className="landing-features" aria-label="Les outils Nouky">
+        <article><span>01 / S’exercer</span><h2>Des cas qui font réfléchir.</h2><p>Dossiers proches du concours et QCM par matière.</p></article>
+        <article><span>02 / Comprendre</span><h2>Une correction utile.</h2><p>Mots-clés, points et explications dès la réponse.</p></article>
+        <article><span>03 / Avancer</span><h2>Le progrès en vue.</h2><p>Un suivi de tes acquis pour cibler les prochaines révisions.</p></article>
       </section>
     </main>
   );
